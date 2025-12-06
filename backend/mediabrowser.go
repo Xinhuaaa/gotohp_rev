@@ -108,7 +108,7 @@ func (m *MediaBrowser) DownloadMedia(mediaKey string) (string, error) {
 		} else {
 			// Last resort: generate a filename based on media key
 			// Use media type to determine extension if available
-			ext := ".bin"
+			ext := ".unknown"
 			if err == nil {
 				if mediaInfo.MediaType == "video" {
 					ext = ".mp4"
