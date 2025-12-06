@@ -578,7 +578,7 @@ func (a *Api) GetDownloadURLs(mediaKey string) (*DownloadURLs, error) {
 				Field3: &generated.GetDownloadUrlsEmpty{},
 				Field5: &generated.GetDownloadUrlsField2Field5Field5Type{
 					Field1: &generated.GetDownloadUrlsEmpty{},
-					Field3: 0,
+					Field3: 1,
 				},
 			},
 		},
