@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { MediaBrowser, ConfigManager } from '../bindings/app/backend'
-import type { MediaItem } from '../bindings/app/backend/mediabrowser'
+import { MediaBrowser, ConfigManager, type MediaItem } from '../bindings/app/backend'
 import Button from "./components/ui/button/Button.vue"
 import MediaItemComponent from './components/MediaItem.vue'
 import { toast } from "vue-sonner"
@@ -32,9 +31,11 @@ async function loadMediaList() {
   loading.value = true
   try {
     const result = await MediaBrowser.GetMediaList(pageToken.value, 50)
-    mediaItems.value = [...mediaItems.value, ...result.items]
-    pageToken.value = result.nextPageToken || ''
-    hasMore.value = !!result.nextPageToken
+    if (result) {
+      mediaItems.value = [...mediaItems.value, ...result.items]
+      pageToken.value = result.nextPageToken || ''
+      hasMore.value = !!result.nextPageToken
+    }
   } catch (error: any) {
     console.error('Failed to load media list:', error)
     toast.error('Failed to load photos', {

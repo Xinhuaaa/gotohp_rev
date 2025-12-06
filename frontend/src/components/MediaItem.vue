@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { MediaBrowser } from '../../bindings/app/backend'
-import type { MediaItem } from '../../bindings/app/backend/mediabrowser'
+import { MediaBrowser, type MediaItem } from '../../bindings/app/backend'
 import Button from "./ui/button/Button.vue"
 import { Download } from 'lucide-vue-next'
 

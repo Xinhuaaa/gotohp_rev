@@ -11,3 +11,8 @@ export {
 export {
     Config
 } from "./models.js";
+
+export type {
+    MediaItem,
+    MediaListResult
+} from "./mediabrowser.js";
