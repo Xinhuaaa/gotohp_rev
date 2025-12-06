@@ -21,6 +21,7 @@ func isCLICommand(arg string) bool {
 	supportedCommands := []string{
 		"upload",
 		"download",
+		"list", "ls", // List media items
 		"credentials", "creds", // Support both full and short form
 		"help", "--help", "-h",
 		"version", "--version", "-v",
@@ -160,6 +161,53 @@ func runCLI() {
 			os.Exit(1)
 		}
 
+	case "list", "ls":
+		// Check for help flag first
+		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
+			printListHelp()
+			return
+		}
+
+		// Parse flags
+		configPath := ""
+		limit := 0 // 0 means no limit
+		pageToken := ""
+		jsonOutput := false
+
+		for i := 2; i < len(os.Args); i++ {
+			switch os.Args[i] {
+			case "--config", "-c":
+				if i+1 < len(os.Args) {
+					configPath = os.Args[i+1]
+					i++
+				}
+			case "--limit", "-n":
+				if i+1 < len(os.Args) {
+					fmt.Sscanf(os.Args[i+1], "%d", &limit)
+					i++
+				}
+			case "--page-token", "-p":
+				if i+1 < len(os.Args) {
+					pageToken = os.Args[i+1]
+					i++
+				}
+			case "--json", "-j":
+				jsonOutput = true
+			}
+		}
+
+		// Set custom config path if provided
+		if configPath != "" {
+			backend.ConfigPath = configPath
+		}
+
+		// Run list
+		err := runCLIList(pageToken, limit, jsonOutput)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "List failed: %v\n", err)
+			os.Exit(1)
+		}
+
 	case "credentials", "creds":
 		if len(os.Args) < 3 {
 			fmt.Println("Error: subcommand required")
@@ -212,6 +260,7 @@ func printCLIHelp() {
 	fmt.Println("Commands:")
 	fmt.Println("  upload <filepath>   Upload a file to Google Photos")
 	fmt.Println("  download <media-key> Download a file from Google Photos")
+	fmt.Println("  list, ls            List media items in Google Photos")
 	fmt.Println("  creds               Manage Google Photos credentials")
 	fmt.Println("  help                Show this help message")
 	fmt.Println("  version             Show version information")
@@ -228,6 +277,18 @@ func printDownloadHelp() {
 	fmt.Println("  -o, --output <path>  Output file path (default: current directory with original filename)")
 	fmt.Println("  --original           Download the original file instead of the edited version")
 	fmt.Println("  -c, --config <path>  Path to config file")
+}
+
+func printListHelp() {
+	fmt.Println("Usage: gotohp list [flags]")
+	fmt.Println()
+	fmt.Println("List media items in your Google Photos library.")
+	fmt.Println()
+	fmt.Println("Flags:")
+	fmt.Println("  -n, --limit <n>       Maximum number of items to return")
+	fmt.Println("  -p, --page-token <t>  Page token for pagination")
+	fmt.Println("  -j, --json            Output in JSON format")
+	fmt.Println("  -c, --config <path>   Path to config file")
 }
 
 func printCredentialsHelp() {

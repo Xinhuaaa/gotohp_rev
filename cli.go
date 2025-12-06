@@ -337,3 +337,61 @@ func runCLIDownload(mediaKey, outputPath string, original bool) error {
 	fmt.Printf("✓ Downloaded successfully: %s\n", outputPath)
 	return nil
 }
+
+// CLI list implementation
+func runCLIList(pageToken string, limit int, jsonOutput bool) error {
+	// Load backend config
+	err := backend.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create API client
+	api, err := backend.NewApi()
+	if err != nil {
+		return fmt.Errorf("failed to create API client: %w", err)
+	}
+
+	// Get media list
+	if !jsonOutput {
+		fmt.Println("Fetching media list...")
+	}
+
+	result, err := api.GetMediaList(pageToken, limit)
+	if err != nil {
+		return fmt.Errorf("failed to get media list: %w", err)
+	}
+
+	if jsonOutput {
+		// Output as JSON
+		jsonBytes, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(jsonBytes))
+	} else {
+		// Human-readable output
+		fmt.Printf("\nFound %d media items:\n\n", len(result.Items))
+
+		for i, item := range result.Items {
+			fmt.Printf("%d. %s\n", i+1, item.MediaKey)
+			if item.Filename != "" {
+				fmt.Printf("   Filename: %s\n", item.Filename)
+			}
+			if item.MediaType != "" {
+				fmt.Printf("   Type: %s\n", item.MediaType)
+			}
+			if item.DedupKey != "" {
+				fmt.Printf("   Dedup Key: %s\n", item.DedupKey)
+			}
+			fmt.Println()
+		}
+
+		if result.NextPageToken != "" {
+			fmt.Printf("Next page token: %s\n", result.NextPageToken)
+			fmt.Printf("Use: gotohp list --page-token \"%s\" to get the next page\n", result.NextPageToken)
+		}
+	}
+
+	return nil
+}
