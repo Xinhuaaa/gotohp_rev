@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -919,12 +920,16 @@ func buildMediaListRequest(pageToken string) []byte {
 func buildMediaListRequestField1(pageToken string) []byte {
 	var buf bytes.Buffer
 
-	// field1.1 - media options
-	field1_1 := buildEmptyNestedMessage([]int{1, 3, 4, 5, 6, 7, 15, 16, 17, 19, 20, 21, 25, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41})
+	// These field numbers correspond to the Google Photos protobuf schema for media list requests
+	// They define which metadata fields to include in the response
+	// field1.1 - media metadata options (file info, timestamps, etc.)
+	mediaMetadataFields := []int{1, 3, 4, 5, 6, 7, 15, 16, 17, 19, 20, 21, 25, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41}
+	field1_1 := buildEmptyNestedMessage(mediaMetadataFields)
 	writeProtobufField(&buf, 1, field1_1)
 
-	// field1.3 - album options
-	field1_3 := buildEmptyNestedMessage([]int{2, 3, 7, 8, 14, 16, 17, 18, 19, 20, 21, 22, 23, 27, 29, 30, 31, 32, 34, 37, 38, 39, 41})
+	// field1.3 - album and collection options
+	albumOptions := []int{2, 3, 7, 8, 14, 16, 17, 18, 19, 20, 21, 22, 23, 27, 29, 30, 31, 32, 34, 37, 38, 39, 41}
+	field1_3 := buildEmptyNestedMessage(albumOptions)
 	writeProtobufField(&buf, 3, field1_3)
 
 	// field1.4 - page token (string)
@@ -1018,6 +1023,11 @@ func parseMediaListResponse(data []byte, limit int) (*MediaListResult, error) {
 	return result, nil
 }
 
+// shouldAddItem checks if we can add more items based on the limit
+func shouldAddItem(currentCount, limit int) bool {
+	return limit <= 0 || currentCount < limit
+}
+
 // extractMediaItemsFromResponse parses the protobuf response bytes and extracts media items
 func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string, string) {
 	var items []MediaItem
@@ -1025,7 +1035,7 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string,
 
 	// Parse the top-level message
 	offset := 0
-	for offset < len(data) && (limit <= 0 || len(items) < limit) {
+	for offset < len(data) && shouldAddItem(len(items), limit) {
 		fieldNum, wireType, newOffset := readTag(data, offset)
 		if newOffset < 0 {
 			break
@@ -1045,7 +1055,11 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string,
 
 			// Field 1 contains the main response data
 			if fieldNum == 1 {
-				extractedItems, token, state := parseResponseField1(fieldData, limit-len(items))
+				remainingLimit := 0
+				if limit > 0 {
+					remainingLimit = limit - len(items)
+				}
+				extractedItems, token, state := parseResponseField1(fieldData, remainingLimit)
 				items = append(items, extractedItems...)
 				if token != "" {
 					nextPageToken = token
@@ -1093,10 +1107,8 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 			// Field 1 often contains media items
 			if fieldNum == 1 {
 				item := tryParseMediaItem(fieldData)
-				if item != nil && item.MediaKey != "" {
-					if limit <= 0 || len(items) < limit {
-						items = append(items, *item)
-					}
+				if item != nil && item.MediaKey != "" && shouldAddItem(len(items), limit) {
+					items = append(items, *item)
 				}
 			}
 			// Field 2 is often the next page token
@@ -1268,17 +1280,19 @@ func readVarint(data []byte, offset int) (uint64, int) {
 	return 0, -1
 }
 
-// isPrintableString checks if the byte slice contains printable characters
+// isPrintableString checks if the byte slice contains valid printable characters
 func isPrintableString(data []byte) bool {
 	if len(data) == 0 {
 		return false
 	}
-	for _, b := range data {
-		if b < 32 || b > 126 {
-			// Allow some extended ASCII and UTF-8
-			if b < 128 {
-				return false
-			}
+	// Use proper UTF-8 validation
+	if !utf8.Valid(data) {
+		return false
+	}
+	// Check that all characters are printable (not control characters)
+	for _, r := range string(data) {
+		if r < 32 && r != '\t' && r != '\n' && r != '\r' {
+			return false
 		}
 	}
 	return true

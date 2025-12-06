@@ -183,7 +183,11 @@ func runCLI() {
 				}
 			case "--limit", "-n":
 				if i+1 < len(os.Args) {
-					fmt.Sscanf(os.Args[i+1], "%d", &limit)
+					_, err := fmt.Sscanf(os.Args[i+1], "%d", &limit)
+					if err != nil || limit < 0 {
+						fmt.Fprintf(os.Stderr, "Warning: invalid limit value '%s', using no limit\n", os.Args[i+1])
+						limit = 0
+					}
 					i++
 				}
 			case "--page-token", "-p":
