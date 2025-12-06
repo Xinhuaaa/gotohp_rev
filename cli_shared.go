@@ -170,7 +170,9 @@ func runCLI() {
 
 		// Parse flags
 		configPath := ""
-		limit := 0 // 0 means no limit
+		limit := 0           // 0 means no limit
+		pages := 1           // Default to 1 page
+		maxEmptyPages := 10  // Default max empty page retries
 		pageToken := ""
 		jsonOutput := false
 
@@ -190,6 +192,24 @@ func runCLI() {
 					}
 					i++
 				}
+			case "--pages":
+				if i+1 < len(os.Args) {
+					_, err := fmt.Sscanf(os.Args[i+1], "%d", &pages)
+					if err != nil || pages < 1 {
+						fmt.Fprintf(os.Stderr, "Warning: invalid pages value '%s', using 1\n", os.Args[i+1])
+						pages = 1
+					}
+					i++
+				}
+			case "--max-empty-pages":
+				if i+1 < len(os.Args) {
+					_, err := fmt.Sscanf(os.Args[i+1], "%d", &maxEmptyPages)
+					if err != nil || maxEmptyPages < 1 {
+						fmt.Fprintf(os.Stderr, "Warning: invalid max-empty-pages value '%s', using 10\n", os.Args[i+1])
+						maxEmptyPages = 10
+					}
+					i++
+				}
 			case "--page-token", "-p":
 				if i+1 < len(os.Args) {
 					pageToken = os.Args[i+1]
@@ -206,7 +226,7 @@ func runCLI() {
 		}
 
 		// Run list
-		err := runCLIList(pageToken, limit, jsonOutput)
+		err := runCLIList(pageToken, limit, pages, maxEmptyPages, jsonOutput)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "List failed: %v\n", err)
 			os.Exit(1)
@@ -289,10 +309,14 @@ func printListHelp() {
 	fmt.Println("List media items in your Google Photos library.")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -n, --limit <n>       Maximum number of items to return")
-	fmt.Println("  -p, --page-token <t>  Page token for pagination")
-	fmt.Println("  -j, --json            Output in JSON format")
-	fmt.Println("  -c, --config <path>   Path to config file")
+	fmt.Println("  -n, --limit <n>          Maximum number of items to return per page")
+	fmt.Println("  --pages <n>              Number of pages to fetch (default: 1)")
+	fmt.Println("  --max-empty-pages <n>    Maximum consecutive empty pages to skip (default: 10)")
+	fmt.Println("  -p, --page-token <t>     Page token for pagination")
+	fmt.Println("  -j, --json               Output in JSON format")
+	fmt.Println("  -c, --config <path>      Path to config file")
+	fmt.Println()
+	fmt.Println("If a page returns 0 items, the next page will be fetched automatically.")
 }
 
 func printCredentialsHelp() {

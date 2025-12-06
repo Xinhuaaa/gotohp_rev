@@ -339,7 +339,7 @@ func runCLIDownload(mediaKey, outputPath string, original bool) error {
 }
 
 // CLI list implementation
-func runCLIList(pageToken string, limit int, jsonOutput bool) error {
+func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonOutput bool) error {
 	// Load backend config
 	err := backend.LoadConfig()
 	if err != nil {
@@ -352,28 +352,83 @@ func runCLIList(pageToken string, limit int, jsonOutput bool) error {
 		return fmt.Errorf("failed to create API client: %w", err)
 	}
 
-	// Get media list
-	if !jsonOutput {
-		fmt.Println("Fetching media list...")
+	// Collect all items across pages
+	var allItems []backend.MediaItem
+	currentPageToken := pageToken
+	lastNextPageToken := ""        // Track the next page token from the last API response
+	pagesRequested := 0
+	emptyPageRetries := 0          // Count consecutive empty pages
+
+	for pagesRequested < pages {
+		// Get media list
+		if !jsonOutput {
+			if pagesRequested == 0 {
+				fmt.Println("Fetching media list...")
+			} else {
+				fmt.Printf("Fetching page %d...\n", pagesRequested+1)
+			}
+		}
+
+		result, err := api.GetMediaList(currentPageToken, limit)
+		if err != nil {
+			return fmt.Errorf("failed to get media list: %w", err)
+		}
+
+		// Always track the latest next page token from API response
+		lastNextPageToken = result.NextPageToken
+
+		// If page has 0 items but has a next page token, auto-skip to next page
+		if len(result.Items) == 0 && result.NextPageToken != "" {
+			if !jsonOutput {
+				fmt.Println("Page has 0 items, automatically fetching next page...")
+			}
+			currentPageToken = result.NextPageToken
+			emptyPageRetries++
+			if emptyPageRetries >= maxEmptyPages {
+				if !jsonOutput {
+					fmt.Printf("Reached max empty pages limit (%d), stopping.\n", maxEmptyPages)
+				}
+				break
+			}
+			continue
+		}
+
+		// Reset empty page counter after finding items
+		emptyPageRetries = 0
+
+		allItems = append(allItems, result.Items...)
+		pagesRequested++
+
+		// If there's no next page token, stop
+		if result.NextPageToken == "" {
+			if !jsonOutput && pagesRequested < pages {
+				fmt.Println("No more pages available.")
+			}
+			break
+		}
+
+		// Update page token for next iteration
+		currentPageToken = result.NextPageToken
 	}
 
-	result, err := api.GetMediaList(pageToken, limit)
-	if err != nil {
-		return fmt.Errorf("failed to get media list: %w", err)
+	// Create final result
+	finalResult := &backend.MediaListResult{
+		Items:         allItems,
+		NextPageToken: lastNextPageToken,
 	}
 
 	if jsonOutput {
 		// Output as JSON
-		jsonBytes, err := json.MarshalIndent(result, "", "  ")
+		jsonBytes, err := json.MarshalIndent(finalResult, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
 		fmt.Println(string(jsonBytes))
 	} else {
 		// Human-readable output
-		fmt.Printf("\nFound %d media items:\n\n", len(result.Items))
+		fmt.Printf("\nFound %d media items:\n\n", len(finalResult.Items))
 
-		for i, item := range result.Items {
+		for i, item := range finalResult.Items {
 			fmt.Printf("%d. %s\n", i+1, item.MediaKey)
 			if item.Filename != "" {
 				fmt.Printf("   Filename: %s\n", item.Filename)
@@ -387,9 +442,9 @@ func runCLIList(pageToken string, limit int, jsonOutput bool) error {
 			fmt.Println()
 		}
 
-		if result.NextPageToken != "" {
-			fmt.Printf("Next page token: %s\n", result.NextPageToken)
-			fmt.Printf("Use: gotohp list --page-token \"%s\" to get the next page\n", result.NextPageToken)
+		if finalResult.NextPageToken != "" {
+			fmt.Printf("Next page token: %s\n", finalResult.NextPageToken)
+			fmt.Printf("Use: gotohp list --page-token \"%s\" to get the next page\n", finalResult.NextPageToken)
 		}
 	}
 
