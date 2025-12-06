@@ -290,6 +290,19 @@ func runCLIDownload(mediaKey, outputPath string, original bool) error {
 		return fmt.Errorf("failed to create API client: %w", err)
 	}
 
+	// Get media info (filename) first if output path not specified
+	var filename string
+	if outputPath == "" {
+		fmt.Printf("Getting media info for: %s\n", mediaKey)
+		mediaInfo, err := api.GetMediaInfo(mediaKey)
+		if err != nil {
+			fmt.Printf("Warning: could not get media info: %v\n", err)
+		} else if mediaInfo != nil && mediaInfo.Filename != "" {
+			filename = mediaInfo.Filename
+			fmt.Printf("Found filename: %s\n", filename)
+		}
+	}
+
 	// Get download URLs
 	fmt.Printf("Getting download URLs for media key: %s\n", mediaKey)
 	urls, err := api.GetDownloadURLs(mediaKey)
@@ -309,22 +322,27 @@ func runCLIDownload(mediaKey, outputPath string, original bool) error {
 
 	// Determine output path if not specified
 	if outputPath == "" {
-		// Try to extract extension from URL, otherwise default to .bin
-		ext := ".bin"
-		if idx := strings.LastIndex(downloadURL, "."); idx != -1 {
-			possibleExt := downloadURL[idx:]
-			// Only use if it looks like a file extension (e.g., .jpg, .mp4)
-			if len(possibleExt) <= 5 && len(possibleExt) > 1 {
-				// Extract just the extension without query params
-				if qIdx := strings.Index(possibleExt, "?"); qIdx != -1 {
-					possibleExt = possibleExt[:qIdx]
-				}
-				if len(possibleExt) > 1 {
-					ext = possibleExt
+		if filename != "" {
+			// Use the original filename from media info
+			outputPath = filename
+		} else {
+			// Fallback: Try to extract extension from URL, otherwise default to .bin
+			ext := ".bin"
+			if idx := strings.LastIndex(downloadURL, "."); idx != -1 {
+				possibleExt := downloadURL[idx:]
+				// Only use if it looks like a file extension (e.g., .jpg, .mp4)
+				if len(possibleExt) <= 5 && len(possibleExt) > 1 {
+					// Extract just the extension without query params
+					if qIdx := strings.Index(possibleExt, "?"); qIdx != -1 {
+						possibleExt = possibleExt[:qIdx]
+					}
+					if len(possibleExt) > 1 {
+						ext = possibleExt
+					}
 				}
 			}
+			outputPath = mediaKey + ext
 		}
-		outputPath = mediaKey + ext
 	}
 
 	// Download the file

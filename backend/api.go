@@ -555,6 +555,7 @@ func (a *Api) CommitUpload(
 type DownloadURLs struct {
 	EditedURL   string // URL for downloading the file with applied edits (if any)
 	OriginalURL string // URL for downloading the original file
+	Filename    string // Original filename of the media item
 }
 
 // GetDownloadURLs retrieves download URLs for a media item
@@ -667,6 +668,347 @@ func (a *Api) GetDownloadURLs(mediaKey string) (*DownloadURLs, error) {
 	}
 
 	return result, nil
+}
+
+// GetMediaInfo retrieves metadata for a specific media item by its media key
+// This includes the filename and other metadata
+func (a *Api) GetMediaInfo(mediaKey string) (*MediaItem, error) {
+	// Build the request to get media info for a specific media key
+	requestData := buildGetMediaInfoRequest(mediaKey)
+
+	// Get the bearer token
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	// Prepare headers
+	headers := map[string]string{
+		"accept-encoding":          "gzip",
+		"Accept-Language":          a.language,
+		"Content-Type":             "application/x-protobuf",
+		"User-Agent":               a.userAgent,
+		"Authorization":            "Bearer " + bearerToken,
+		"x-goog-ext-173412678-bin": "CgcIAhClARgC",
+		"x-goog-ext-174067345-bin": "CgIIAg==",
+	}
+
+	// Create the request
+	req, err := http.NewRequest(
+		"POST",
+		"https://photosdata-pa.googleapis.com/6439526531001121323/18047484249733410717",
+		bytes.NewReader(requestData),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	// Make the request
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Handle gzip response if needed
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer reader.(*gzip.Reader).Close()
+	}
+
+	// Read the response body
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Parse the response to extract media item info
+	item := parseMediaInfoResponse(bodyBytes, mediaKey)
+	if item == nil {
+		return nil, fmt.Errorf("media item not found for key: %s", mediaKey)
+	}
+
+	return item, nil
+}
+
+// buildGetMediaInfoRequest creates a protobuf request to get info for a specific media key
+func buildGetMediaInfoRequest(mediaKey string) []byte {
+	var buf bytes.Buffer
+
+	// Build field 1 (request data)
+	field1 := buildGetMediaInfoRequestField1(mediaKey)
+	writeProtobufField(&buf, 1, field1)
+
+	// Build field 2 (additional options)
+	field2 := buildMediaListRequestField2()
+	writeProtobufField(&buf, 2, field2)
+
+	return buf.Bytes()
+}
+
+func buildGetMediaInfoRequestField1(mediaKey string) []byte {
+	var buf bytes.Buffer
+
+	// field1.1 - media metadata options (file info, timestamps, etc.)
+	mediaMetadataFields := []int{1, 3, 4, 5, 6, 7, 15, 16, 17, 19, 20, 21, 25, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41}
+	field1_1 := buildEmptyNestedMessage(mediaMetadataFields)
+	writeProtobufField(&buf, 1, field1_1)
+
+	// field1.3 - album and collection options
+	albumOptions := []int{2, 3, 7, 8, 14, 16, 17, 18, 19, 20, 21, 22, 23, 27, 29, 30, 31, 32, 34, 37, 38, 39, 41}
+	field1_3 := buildEmptyNestedMessage(albumOptions)
+	writeProtobufField(&buf, 3, field1_3)
+
+	// field1.5 - media key filter
+	var field5 bytes.Buffer
+	writeProtobufString(&field5, 1, mediaKey)
+	writeProtobufField(&buf, 5, field5.Bytes())
+
+	// field1.7 - type (varint = 2)
+	writeProtobufVarint(&buf, 7, 2)
+
+	// field1.11 - repeated ints [1, 2]
+	writeProtobufVarint(&buf, 11, 1)
+	writeProtobufVarint(&buf, 11, 2)
+
+	// field1.22 - some config
+	var field22 bytes.Buffer
+	writeProtobufVarint(&field22, 1, 2)
+	writeProtobufField(&buf, 22, field22.Bytes())
+
+	return buf.Bytes()
+}
+
+// selectBetterItem compares two media items and returns the better one
+// Prefers items with filename, otherwise returns the new item if current is nil
+func selectBetterItem(current, candidate *MediaItem) *MediaItem {
+	if candidate == nil {
+		return current
+	}
+	// If candidate has filename and current doesn't, prefer candidate
+	if candidate.Filename != "" {
+		if current == nil || current.Filename == "" {
+			return candidate
+		}
+	}
+	// If current is nil, use candidate
+	if current == nil {
+		return candidate
+	}
+	return current
+}
+
+// parseMediaInfoResponse parses the protobuf response to extract media item info
+// for the target media key. Returns nil if no matching item is found.
+func parseMediaInfoResponse(data []byte, targetMediaKey string) *MediaItem {
+	// Parse the response using the same logic as media list parsing
+	items, _, _ := extractMediaItemsFromResponse(data, 0)
+
+	// Find the matching item (prefer ones with filename)
+	var matchedItem *MediaItem
+	for i := range items {
+		if items[i].MediaKey == targetMediaKey {
+			candidate := &items[i]
+			if candidate.Filename != "" {
+				// Found a match with filename, return immediately
+				return candidate
+			}
+			matchedItem = selectBetterItem(matchedItem, candidate)
+		}
+	}
+
+	// If we found a match (even without filename), return it
+	if matchedItem != nil {
+		return matchedItem
+	}
+
+	// If not found in standard parsing, try to extract from nested structures
+	return tryExtractMediaItem(data, targetMediaKey)
+}
+
+// tryExtractMediaItem attempts to extract media item info from the response data
+// It recursively searches nested structures for the target media key
+func tryExtractMediaItem(data []byte, targetMediaKey string) *MediaItem {
+	var result *MediaItem
+
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			break
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0: // Varint
+			_, offset = readVarint(data, offset)
+		case 2: // Length-delimited
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				return result
+			}
+			fieldData := data[newOffset : newOffset+int(length)]
+			offset = newOffset + int(length)
+
+			// Try to parse this field as a media item
+			if fieldNum == 1 || fieldNum == 2 {
+				item := tryParseMediaItemWithKey(fieldData, targetMediaKey)
+				if item != nil && item.MediaKey == targetMediaKey {
+					if item.Filename != "" {
+						return item
+					}
+					result = selectBetterItem(result, item)
+				}
+				// Recurse into nested messages
+				nested := tryExtractMediaItem(fieldData, targetMediaKey)
+				if nested != nil && nested.MediaKey == targetMediaKey {
+					if nested.Filename != "" {
+						return nested
+					}
+					result = selectBetterItem(result, nested)
+				}
+			}
+		case 5: // 32-bit
+			offset += 4
+		case 1: // 64-bit
+			offset += 8
+		default:
+			return result
+		}
+	}
+	return result
+}
+
+// tryParseMediaItemWithKey parses a message that might contain a media item with the target key
+func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
+	item := &MediaItem{}
+
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			break
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0: // Varint
+			val, newOffset := readVarint(data, offset)
+			offset = newOffset
+			if fieldNum == 5 {
+				if val == 1 {
+					item.MediaType = "photo"
+				} else if val == 2 {
+					item.MediaType = "video"
+				}
+			}
+		case 2: // Length-delimited
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				return item
+			}
+			fieldData := data[newOffset : newOffset+int(length)]
+			offset = newOffset + int(length)
+
+			switch fieldNum {
+			case 1:
+				// Could be media key (string) or nested message
+				if isPrintableString(fieldData) && len(fieldData) > minMediaKeyLength {
+					item.MediaKey = string(fieldData)
+				} else {
+					// Try to parse nested message
+					nested := tryParseMediaItemWithKey(fieldData, targetMediaKey)
+					if nested != nil && nested.MediaKey != "" {
+						// Only update MediaKey if it matches target or we don't have one yet
+						if item.MediaKey == "" {
+							item.MediaKey = nested.MediaKey
+						}
+						// Always update filename and media type if available
+						if nested.Filename != "" && item.Filename == "" {
+							item.Filename = nested.Filename
+						}
+						if nested.MediaType != "" && item.MediaType == "" {
+							item.MediaType = nested.MediaType
+						}
+					}
+				}
+			case 2:
+				// Field 2 contains nested metadata with filename at sub-field 4
+				filename := extractFilenameFromField2(fieldData)
+				if filename != "" {
+					item.Filename = filename
+				} else if isPrintableString(fieldData) {
+					// Could be dedup key or filename
+					str := string(fieldData)
+					if strings.Contains(str, ".") && item.Filename == "" {
+						item.Filename = str
+					} else if item.DedupKey == "" {
+						item.DedupKey = str
+					}
+				}
+			}
+		case 5: // 32-bit
+			offset += 4
+		case 1: // 64-bit
+			offset += 8
+		default:
+			return item
+		}
+	}
+
+	return item
+}
+
+// extractFilenameFromField2 extracts the filename from field 2 of a media item
+// Based on the structure: field2 -> field4 = filename
+func extractFilenameFromField2(data []byte) string {
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			break
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0: // Varint
+			_, offset = readVarint(data, offset)
+		case 2: // Length-delimited
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				return ""
+			}
+			fieldData := data[newOffset : newOffset+int(length)]
+			offset = newOffset + int(length)
+
+			// Field 4 is the filename
+			if fieldNum == 4 && isPrintableString(fieldData) {
+				return string(fieldData)
+			}
+		case 5: // 32-bit
+			offset += 4
+		case 1: // 64-bit
+			offset += 8
+		default:
+			return ""
+		}
+	}
+	return ""
 }
 
 // GetThumbnail retrieves a thumbnail for a media item
