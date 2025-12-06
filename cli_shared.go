@@ -20,6 +20,7 @@ func getAppVersion() string {
 func isCLICommand(arg string) bool {
 	supportedCommands := []string{
 		"upload",
+		"download",
 		"credentials", "creds", // Support both full and short form
 		"help", "--help", "-h",
 		"version", "--version", "-v",
@@ -111,6 +112,54 @@ func runCLI() {
 			os.Exit(1)
 		}
 
+	case "download":
+		// Check for help flag first
+		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
+			printDownloadHelp()
+			return
+		}
+
+		if len(os.Args) < 3 {
+			fmt.Println("Error: media-key required")
+			printDownloadHelp()
+			os.Exit(1)
+		}
+
+		mediaKey := os.Args[2]
+		outputPath := ""
+		original := false
+		configPath := ""
+
+		// Parse flags
+		for i := 3; i < len(os.Args); i++ {
+			switch os.Args[i] {
+			case "--output", "-o":
+				if i+1 < len(os.Args) {
+					outputPath = os.Args[i+1]
+					i++
+				}
+			case "--original":
+				original = true
+			case "--config", "-c":
+				if i+1 < len(os.Args) {
+					configPath = os.Args[i+1]
+					i++
+				}
+			}
+		}
+
+		// Set custom config path if provided
+		if configPath != "" {
+			backend.ConfigPath = configPath
+		}
+
+		// Run download
+		err := runCLIDownload(mediaKey, outputPath, original)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Download failed: %v\n", err)
+			os.Exit(1)
+		}
+
 	case "credentials", "creds":
 		if len(os.Args) < 3 {
 			fmt.Println("Error: subcommand required")
@@ -162,11 +211,23 @@ func printCLIHelp() {
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  upload <filepath>   Upload a file to Google Photos")
+	fmt.Println("  download <media-key> Download a file from Google Photos")
 	fmt.Println("  creds               Manage Google Photos credentials")
 	fmt.Println("  help                Show this help message")
 	fmt.Println("  version             Show version information")
 	fmt.Println()
 	fmt.Println("Run 'gotohp <command> --help' for more information on a command")
+}
+
+func printDownloadHelp() {
+	fmt.Println("Usage: gotohp download <media-key> [flags]")
+	fmt.Println()
+	fmt.Println("Download a file from Google Photos using its media key.")
+	fmt.Println()
+	fmt.Println("Flags:")
+	fmt.Println("  -o, --output <path>  Output file path (default: current directory with original filename)")
+	fmt.Println("  --original           Download the original file instead of the edited version")
+	fmt.Println("  -c, --config <path>  Path to config file")
 }
 
 func printCredentialsHelp() {

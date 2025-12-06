@@ -275,3 +275,50 @@ func runCLIUpload(filePaths []string, config cliConfig) error {
 
 	return nil
 }
+
+// CLI download implementation
+func runCLIDownload(mediaKey, outputPath string, original bool) error {
+	// Load backend config
+	err := backend.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create API client
+	api, err := backend.NewApi()
+	if err != nil {
+		return fmt.Errorf("failed to create API client: %w", err)
+	}
+
+	// Get download URLs
+	fmt.Printf("Getting download URLs for media key: %s\n", mediaKey)
+	urls, err := api.GetDownloadURLs(mediaKey)
+	if err != nil {
+		return fmt.Errorf("failed to get download URLs: %w", err)
+	}
+
+	// Select the appropriate URL
+	downloadURL := urls.EditedURL
+	if original && urls.OriginalURL != "" {
+		downloadURL = urls.OriginalURL
+	}
+
+	if downloadURL == "" {
+		return fmt.Errorf("no download URL available")
+	}
+
+	// Determine output path if not specified
+	if outputPath == "" {
+		outputPath = mediaKey + ".jpg"
+	}
+
+	// Download the file
+	fmt.Printf("Downloading to: %s\n", outputPath)
+	err = api.DownloadFile(downloadURL, outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to download file: %w", err)
+	}
+
+	fmt.Printf("✓ Downloaded successfully: %s\n", outputPath)
+	return nil
+}
