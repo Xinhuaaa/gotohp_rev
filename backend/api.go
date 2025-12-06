@@ -1530,8 +1530,12 @@ func tryParseMediaItem(data []byte) *MediaItem {
 					}
 				}
 			case 2:
-				if isPrintableString(fieldData) {
-					// Could be filename or dedup key
+				// Field 2 is a nested message containing metadata including filename at sub-field 4
+				// Try to extract filename from nested structure first
+				if filename := extractFilenameFromField2(fieldData); filename != "" {
+					item.Filename = filename
+				} else if isPrintableString(fieldData) {
+					// Fallback: Could be filename or dedup key directly
 					if item.Filename == "" && strings.Contains(string(fieldData), ".") {
 						item.Filename = string(fieldData)
 					} else if item.DedupKey == "" {
