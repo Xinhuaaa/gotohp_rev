@@ -102,7 +102,16 @@ func (m *MediaBrowser) DownloadMedia(mediaKey string) (string, error) {
 			filename = mediaInfo.Filename
 		} else {
 			// Last resort: generate a filename based on media key
-			filename = fmt.Sprintf("%s.jpg", mediaKey[:10])
+			// Use media type to determine extension if available
+			ext := ".bin"
+			if err == nil {
+				if mediaInfo.MediaType == "video" {
+					ext = ".mp4"
+				} else if mediaInfo.MediaType == "photo" {
+					ext = ".jpg"
+				}
+			}
+			filename = fmt.Sprintf("%s%s", mediaKey[:10], ext)
 		}
 	}
 	outputPath := filepath.Join(downloadsDir, filename)
