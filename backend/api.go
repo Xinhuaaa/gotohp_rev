@@ -666,19 +666,23 @@ func (a *Api) GetDownloadURLs(mediaKey string) (*DownloadURLs, error) {
 
 		// Extract download URLs from field5
 		if field5 := field1.GetField5(); field5 != nil {
-			// Try to get photo download URLs from field2
-			if field2 := field5.GetField2(); field2 != nil {
-				result.EditedURL = field2.GetEditedUrl()
-				result.OriginalURL = field2.GetOriginalUrl()
-			}
-
-			// Try to get video download URL from field3.field5
+			// Try to get video download URL first from field3.field5
+			// Videos have a different structure than photos
 			if field3 := field5.GetField3(); field3 != nil {
 				videoURL := field3.GetField5()
 				if videoURL != "" {
 					// For videos, use the video URL as the original URL
+					// Clear both URLs first to avoid mixing video and photo data
 					result.OriginalURL = videoURL
+					result.EditedURL = ""
+					return result, nil
 				}
+			}
+
+			// If no video URL, try to get photo download URLs from field2
+			if field2 := field5.GetField2(); field2 != nil {
+				result.EditedURL = field2.GetEditedUrl()
+				result.OriginalURL = field2.GetOriginalUrl()
 			}
 		}
 	}

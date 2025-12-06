@@ -7,6 +7,11 @@ import (
 	"path/filepath"
 )
 
+const (
+	// mediaKeyPrefixLength is the maximum length used when generating filenames from media keys
+	mediaKeyPrefixLength = 10
+)
+
 // MediaBrowser handles media browsing operations
 type MediaBrowser struct{}
 
@@ -113,8 +118,8 @@ func (m *MediaBrowser) DownloadMedia(mediaKey string) (string, error) {
 			}
 			// Safely slice mediaKey to avoid panic
 			keyPrefix := mediaKey
-			if len(mediaKey) > 10 {
-				keyPrefix = mediaKey[:10]
+			if len(mediaKey) > mediaKeyPrefixLength {
+				keyPrefix = mediaKey[:mediaKeyPrefixLength]
 			}
 			filename = fmt.Sprintf("%s%s", keyPrefix, ext)
 		}
