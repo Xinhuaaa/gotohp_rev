@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -353,6 +354,77 @@ func runCLIDownload(mediaKey, outputPath string, original bool) error {
 	}
 
 	fmt.Printf("✓ Downloaded successfully: %s\n", outputPath)
+	return nil
+}
+
+// ThumbnailSize represents predefined thumbnail sizes
+type ThumbnailSize struct {
+	Width  int
+	Height int
+}
+
+// Predefined thumbnail sizes (based on actual server request patterns)
+var thumbnailSizes = map[string]ThumbnailSize{
+	"small":  {Width: 50, Height: 50},
+	"medium": {Width: 800, Height: 800},
+	"large":  {Width: 1600, Height: 1600},
+}
+
+// CLI thumbnail implementation
+func runCLIThumbnail(mediaKey, outputPath string, width, height int, size string, noOverlay, forceJPEG bool) error {
+	// Load backend config
+	err := backend.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create API client
+	api, err := backend.NewApi()
+	if err != nil {
+		return fmt.Errorf("failed to create API client: %w", err)
+	}
+
+	// If size preset is specified, use it
+	if size != "" {
+		preset, ok := thumbnailSizes[strings.ToLower(size)]
+		if !ok {
+			return fmt.Errorf("invalid size preset '%s'. Use: small, medium, large", size)
+		}
+		width = preset.Width
+		height = preset.Height
+		fmt.Printf("Using %s preset: %dx%d\n", size, width, height)
+	}
+
+	// If no width/height specified and no size preset, use medium as default
+	if width == 0 && height == 0 {
+		width = thumbnailSizes["medium"].Width
+		height = thumbnailSizes["medium"].Height
+		fmt.Println("Using default medium size: 800x800")
+	}
+
+	// Get the thumbnail
+	fmt.Printf("Getting thumbnail for media key: %s\n", mediaKey)
+	thumbnailData, err := api.GetThumbnail(mediaKey, width, height, forceJPEG, 0, noOverlay)
+	if err != nil {
+		return fmt.Errorf("failed to get thumbnail: %w", err)
+	}
+
+	// Determine output path if not specified
+	if outputPath == "" {
+		ext := ".jpg"
+		if !forceJPEG {
+			ext = ".png"
+		}
+		outputPath = fmt.Sprintf("%s_thumb_%dx%d%s", mediaKey, width, height, ext)
+	}
+
+	// Write thumbnail to file
+	err = os.WriteFile(outputPath, thumbnailData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write thumbnail file: %w", err)
+	}
+
+	fmt.Printf("✓ Thumbnail saved: %s (%d bytes)\n", outputPath, len(thumbnailData))
 	return nil
 }
 

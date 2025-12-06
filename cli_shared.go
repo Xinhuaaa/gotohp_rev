@@ -21,7 +21,8 @@ func isCLICommand(arg string) bool {
 	supportedCommands := []string{
 		"upload",
 		"download",
-		"list", "ls", // List media items
+		"thumbnail", "thumb", // Get thumbnail at various sizes
+		"list", "ls",         // List media items
 		"credentials", "creds", // Support both full and short form
 		"help", "--help", "-h",
 		"version", "--version", "-v",
@@ -161,6 +162,81 @@ func runCLI() {
 			os.Exit(1)
 		}
 
+	case "thumbnail", "thumb":
+		// Check for help flag first
+		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
+			printThumbnailHelp()
+			return
+		}
+
+		if len(os.Args) < 3 {
+			fmt.Println("Error: media-key required")
+			printThumbnailHelp()
+			os.Exit(1)
+		}
+
+		mediaKey := os.Args[2]
+		outputPath := ""
+		width := 0
+		height := 0
+		size := ""
+		noOverlay := true
+		forceJPEG := true
+		configPath := ""
+
+		// Parse flags
+		for i := 3; i < len(os.Args); i++ {
+			switch os.Args[i] {
+			case "--output", "-o":
+				if i+1 < len(os.Args) {
+					outputPath = os.Args[i+1]
+					i++
+				}
+			case "--width", "-w":
+				if i+1 < len(os.Args) {
+					if _, err := fmt.Sscanf(os.Args[i+1], "%d", &width); err != nil || width <= 0 {
+						fmt.Fprintf(os.Stderr, "Warning: invalid width '%s', ignoring\n", os.Args[i+1])
+						width = 0
+					}
+					i++
+				}
+			case "--height", "-h":
+				if i+1 < len(os.Args) {
+					if _, err := fmt.Sscanf(os.Args[i+1], "%d", &height); err != nil || height <= 0 {
+						fmt.Fprintf(os.Stderr, "Warning: invalid height '%s', ignoring\n", os.Args[i+1])
+						height = 0
+					}
+					i++
+				}
+			case "--size", "-s":
+				if i+1 < len(os.Args) {
+					size = os.Args[i+1]
+					i++
+				}
+			case "--overlay":
+				noOverlay = false
+			case "--png":
+				forceJPEG = false
+			case "--config", "-c":
+				if i+1 < len(os.Args) {
+					configPath = os.Args[i+1]
+					i++
+				}
+			}
+		}
+
+		// Set custom config path if provided
+		if configPath != "" {
+			backend.ConfigPath = configPath
+		}
+
+		// Run thumbnail download
+		err := runCLIThumbnail(mediaKey, outputPath, width, height, size, noOverlay, forceJPEG)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Thumbnail download failed: %v\n", err)
+			os.Exit(1)
+		}
+
 	case "list", "ls":
 		// Check for help flag first
 		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
@@ -284,6 +360,7 @@ func printCLIHelp() {
 	fmt.Println("Commands:")
 	fmt.Println("  upload <filepath>   Upload a file to Google Photos")
 	fmt.Println("  download <media-key> Download a file from Google Photos")
+	fmt.Println("  thumbnail <media-key> Download a thumbnail at various sizes")
 	fmt.Println("  list, ls            List media items in Google Photos")
 	fmt.Println("  creds               Manage Google Photos credentials")
 	fmt.Println("  help                Show this help message")
@@ -301,6 +378,31 @@ func printDownloadHelp() {
 	fmt.Println("  -o, --output <path>  Output file path (default: current directory with original filename)")
 	fmt.Println("  --original           Download the original file instead of the edited version")
 	fmt.Println("  -c, --config <path>  Path to config file")
+}
+
+func printThumbnailHelp() {
+	fmt.Println("Usage: gotohp thumbnail <media-key> [flags]")
+	fmt.Println()
+	fmt.Println("Download a thumbnail of a media item at various sizes.")
+	fmt.Println()
+	fmt.Println("Size Presets (--size, -s):")
+	fmt.Println("  small    - 50x50 pixels")
+	fmt.Println("  medium   - 800x800 pixels")
+	fmt.Println("  large    - 1600x1600 pixels")
+	fmt.Println()
+	fmt.Println("Flags:")
+	fmt.Println("  -o, --output <path>   Output file path (default: <media-key>_thumb.jpg)")
+	fmt.Println("  -s, --size <preset>   Use a size preset (small, medium, large)")
+	fmt.Println("  -w, --width <pixels>  Custom thumbnail width in pixels")
+	fmt.Println("  -h, --height <pixels> Custom thumbnail height in pixels (note: use after -w to avoid conflict with --help)")
+	fmt.Println("  --overlay             Include overlay (e.g., play symbol for videos)")
+	fmt.Println("  --png                 Get PNG format instead of JPEG")
+	fmt.Println("  -c, --config <path>   Path to config file")
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  gotohp thumbnail ABC123 --size medium")
+	fmt.Println("  gotohp thumbnail ABC123 -w 640 -h 480")
+	fmt.Println("  gotohp thumbnail ABC123 --size large -o photo_thumb.jpg")
 }
 
 func printListHelp() {

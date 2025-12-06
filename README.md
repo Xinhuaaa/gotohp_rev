@@ -28,6 +28,7 @@ gotohp-cli.exe upload C:\path\to\photos --recursive --threads 5
 gotohp-cli.exe creds list
 gotohp-cli.exe creds add "androidId=..."
 gotohp-cli.exe creds set user@gmail.com
+gotohp-cli.exe thumbnail <media-key> --size large
 gotohp-cli.exe version
 ```
 
@@ -40,6 +41,14 @@ gotohp-cli.exe version
   - `-d, --delete` - Delete from host after upload
   - `-df, --disable-filter` - Disable file type filtering
   - `-l, --log-level <level>` - Set log level: debug, info, warn, error (default: info)
+  - `-c, --config <path>` - Path to config file
+- `thumbnail <media-key>` (alias: `thumb`) - Download a thumbnail at various sizes
+  - `-s, --size <preset>` - Size preset: small (50px), medium (800px), large (1600px)
+  - `-w, --width <pixels>` - Custom thumbnail width
+  - `-h, --height <pixels>` - Custom thumbnail height
+  - `-o, --output <path>` - Output file path
+  - `--overlay` - Include overlay (e.g., play symbol for videos)
+  - `--png` - Get PNG format instead of JPEG
   - `-c, --config <path>` - Path to config file
 - `creds list` (alias: `ls`) - List all credentials
 - `creds add <auth-string>` - Add new credentials
@@ -55,6 +64,7 @@ The main executable supports CLI mode:
 ```bash
 ./gotohp upload /path/to/photos --recursive --threads 5
 ./gotohp creds list
+./gotohp thumbnail <media-key> --size large
 ./gotohp version
 ```
 
