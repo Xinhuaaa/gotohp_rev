@@ -309,7 +309,22 @@ func runCLIDownload(mediaKey, outputPath string, original bool) error {
 
 	// Determine output path if not specified
 	if outputPath == "" {
-		outputPath = mediaKey + ".jpg"
+		// Try to extract extension from URL, otherwise default to .bin
+		ext := ".bin"
+		if idx := strings.LastIndex(downloadURL, "."); idx != -1 {
+			possibleExt := downloadURL[idx:]
+			// Only use if it looks like a file extension (e.g., .jpg, .mp4)
+			if len(possibleExt) <= 5 && len(possibleExt) > 1 {
+				// Extract just the extension without query params
+				if qIdx := strings.Index(possibleExt, "?"); qIdx != -1 {
+					possibleExt = possibleExt[:qIdx]
+				}
+				if len(possibleExt) > 1 {
+					ext = possibleExt
+				}
+			}
+		}
+		outputPath = mediaKey + ext
 	}
 
 	// Download the file

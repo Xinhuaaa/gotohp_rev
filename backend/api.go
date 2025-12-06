@@ -654,11 +654,15 @@ func (a *Api) GetDownloadURLs(mediaKey string) (*DownloadURLs, error) {
 		return nil, fmt.Errorf("failed to unmarshal protobuf: %w", err)
 	}
 
-	// Extract URLs from response
+	// Extract URLs from response with helper variables for readability
 	result := &DownloadURLs{}
-	if pbResp.GetField1() != nil && pbResp.GetField1().GetField5() != nil && pbResp.GetField1().GetField5().GetField2() != nil {
-		result.EditedURL = pbResp.GetField1().GetField5().GetField2().GetEditedUrl()
-		result.OriginalURL = pbResp.GetField1().GetField5().GetField2().GetOriginalUrl()
+	if field1 := pbResp.GetField1(); field1 != nil {
+		if field5 := field1.GetField5(); field5 != nil {
+			if field2 := field5.GetField2(); field2 != nil {
+				result.EditedURL = field2.GetEditedUrl()
+				result.OriginalURL = field2.GetOriginalUrl()
+			}
+		}
 	}
 
 	return result, nil
