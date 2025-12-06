@@ -824,6 +824,10 @@ type MediaListResult struct {
 	StateToken    string      `json:"stateToken,omitempty"`
 }
 
+// minMediaKeyLength is the minimum expected length for a valid media key string
+// Google Photos media keys are typically base64-encoded identifiers > 10 chars
+const minMediaKeyLength = 10
+
 // GetMediaList retrieves a list of media items from the library
 // This uses a simplified request to fetch media items with pagination support
 func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
@@ -1168,7 +1172,7 @@ func tryParseMediaItem(data []byte) *MediaItem {
 			switch fieldNum {
 			case 1:
 				// Could be media key (string) or nested message
-				if isPrintableString(fieldData) && len(fieldData) > 10 {
+				if isPrintableString(fieldData) && len(fieldData) > minMediaKeyLength {
 					item.MediaKey = string(fieldData)
 				} else {
 					// Try to parse nested message for media info
@@ -1285,15 +1289,19 @@ func isPrintableString(data []byte) bool {
 	if len(data) == 0 {
 		return false
 	}
-	// Use proper UTF-8 validation
-	if !utf8.Valid(data) {
-		return false
-	}
-	// Check that all characters are printable (not control characters)
-	for _, r := range string(data) {
+	// Check UTF-8 validity and that all characters are printable
+	// Use DecodeRune to iterate without creating a string
+	for i := 0; i < len(data); {
+		r, size := utf8.DecodeRune(data[i:])
+		if r == utf8.RuneError && size == 1 {
+			// Invalid UTF-8
+			return false
+		}
+		// Check for control characters (except whitespace)
 		if r < 32 && r != '\t' && r != '\n' && r != '\r' {
 			return false
 		}
+		i += size
 	}
 	return true
 }

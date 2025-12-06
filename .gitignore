@@ -8,3 +8,4 @@ config.yaml
 wails_windows_amd64.syso
 *.zip
 gotohp-cli
+gotohp
