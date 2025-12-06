@@ -275,3 +275,65 @@ func runCLIUpload(filePaths []string, config cliConfig) error {
 
 	return nil
 }
+
+// CLI download implementation
+func runCLIDownload(mediaKey, outputPath string, original bool) error {
+	// Load backend config
+	err := backend.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create API client
+	api, err := backend.NewApi()
+	if err != nil {
+		return fmt.Errorf("failed to create API client: %w", err)
+	}
+
+	// Get download URLs
+	fmt.Printf("Getting download URLs for media key: %s\n", mediaKey)
+	urls, err := api.GetDownloadURLs(mediaKey)
+	if err != nil {
+		return fmt.Errorf("failed to get download URLs: %w", err)
+	}
+
+	// Select the appropriate URL
+	downloadURL := urls.EditedURL
+	if original && urls.OriginalURL != "" {
+		downloadURL = urls.OriginalURL
+	}
+
+	if downloadURL == "" {
+		return fmt.Errorf("no download URL available")
+	}
+
+	// Determine output path if not specified
+	if outputPath == "" {
+		// Try to extract extension from URL, otherwise default to .bin
+		ext := ".bin"
+		if idx := strings.LastIndex(downloadURL, "."); idx != -1 {
+			possibleExt := downloadURL[idx:]
+			// Only use if it looks like a file extension (e.g., .jpg, .mp4)
+			if len(possibleExt) <= 5 && len(possibleExt) > 1 {
+				// Extract just the extension without query params
+				if qIdx := strings.Index(possibleExt, "?"); qIdx != -1 {
+					possibleExt = possibleExt[:qIdx]
+				}
+				if len(possibleExt) > 1 {
+					ext = possibleExt
+				}
+			}
+		}
+		outputPath = mediaKey + ext
+	}
+
+	// Download the file
+	fmt.Printf("Downloading to: %s\n", outputPath)
+	err = api.DownloadFile(downloadURL, outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to download file: %w", err)
+	}
+
+	fmt.Printf("✓ Downloaded successfully: %s\n", outputPath)
+	return nil
+}

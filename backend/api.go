@@ -549,3 +549,260 @@ func (a *Api) CommitUpload(
 
 	return mediaKey, nil
 }
+
+// DownloadURLs contains the download URLs for a media item
+type DownloadURLs struct {
+	EditedURL   string // URL for downloading the file with applied edits (if any)
+	OriginalURL string // URL for downloading the original file
+}
+
+// GetDownloadURLs retrieves download URLs for a media item
+func (a *Api) GetDownloadURLs(mediaKey string) (*DownloadURLs, error) {
+	// Create the protobuf message
+	protoBody := generated.GetDownloadUrls{
+		Field1: &generated.GetDownloadUrlsField1Type{
+			Field1: &generated.GetDownloadUrlsField1Field1Type{
+				MediaKey: mediaKey,
+			},
+		},
+		Field2: &generated.GetDownloadUrlsField2Type{
+			Field1: &generated.GetDownloadUrlsField2Field1Type{
+				Field7: &generated.GetDownloadUrlsField2Field1Field7Type{
+					Field2: &generated.GetDownloadUrlsEmpty{},
+				},
+			},
+			Field5: &generated.GetDownloadUrlsField2Field5Type{
+				Field2: &generated.GetDownloadUrlsEmpty{},
+				Field3: &generated.GetDownloadUrlsEmpty{},
+				Field5: &generated.GetDownloadUrlsField2Field5Field5Type{
+					Field1: &generated.GetDownloadUrlsEmpty{},
+					Field3: 0,
+				},
+			},
+		},
+	}
+
+	// Serialize the protobuf message
+	serializedData, err := proto.Marshal(&protoBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal protobuf: %w", err)
+	}
+
+	// Get the bearer token
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	// Prepare headers
+	headers := map[string]string{
+		"accept-encoding":          "gzip",
+		"Accept-Language":          a.language,
+		"Content-Type":             "application/x-protobuf",
+		"User-Agent":               a.userAgent,
+		"Authorization":            "Bearer " + bearerToken,
+		"x-goog-ext-173412678-bin": "CgcIAhClARgC",
+		"x-goog-ext-174067345-bin": "CgIIAg==",
+	}
+
+	// Create the request
+	req, err := http.NewRequest(
+		"POST",
+		"https://photosdata-pa.googleapis.com/$rpc/social.frontend.photos.preparedownloaddata.v1.PhotosPrepareDownloadDataService/PhotosPrepareDownload",
+		bytes.NewReader(serializedData),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	// Make the request
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Handle gzip response if needed
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer reader.(*gzip.Reader).Close()
+	}
+
+	// Parse the response body
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var pbResp generated.GetDownloadUrlsResponse
+	if err := proto.Unmarshal(bodyBytes, &pbResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal protobuf: %w", err)
+	}
+
+	// Extract URLs from response with helper variables for readability
+	result := &DownloadURLs{}
+	if field1 := pbResp.GetField1(); field1 != nil {
+		if field5 := field1.GetField5(); field5 != nil {
+			if field2 := field5.GetField2(); field2 != nil {
+				result.EditedURL = field2.GetEditedUrl()
+				result.OriginalURL = field2.GetOriginalUrl()
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// GetThumbnail retrieves a thumbnail for a media item
+func (a *Api) GetThumbnail(mediaKey string, width, height int, forceJPEG bool, contentVersion int, noOverlay bool) ([]byte, error) {
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	// Build URL
+	url := fmt.Sprintf("https://ap2.googleusercontent.com/gpa/%s=k-sg", mediaKey)
+	if width > 0 {
+		url += fmt.Sprintf("-w%d", width)
+	}
+	if height > 0 {
+		url += fmt.Sprintf("-h%d", height)
+	}
+	if forceJPEG {
+		url += "-rj"
+	}
+	if contentVersion > 0 {
+		url += fmt.Sprintf("-iv%d", contentVersion)
+	}
+	if noOverlay {
+		url += "-no"
+	}
+
+	// Prepare headers
+	headers := map[string]string{
+		"Authorization":   "Bearer " + bearerToken,
+		"User-Agent":      a.userAgent,
+		"Accept-Encoding": "gzip",
+	}
+
+	// Create the request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	// Make the request
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Handle gzip response if needed
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer reader.(*gzip.Reader).Close()
+	}
+
+	// Read the response body
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return bodyBytes, nil
+}
+
+// DownloadFile downloads a file from a given URL and saves it to the specified path
+func (a *Api) DownloadFile(downloadURL, outputPath string) error {
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	// Prepare headers
+	headers := map[string]string{
+		"Authorization":   "Bearer " + bearerToken,
+		"User-Agent":      a.userAgent,
+		"Accept-Encoding": "gzip",
+	}
+
+	// Create the request
+	req, err := http.NewRequest("GET", downloadURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	// Make the request
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Create output file
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	// Handle gzip response if needed
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer reader.(*gzip.Reader).Close()
+	}
+
+	// Copy response body to file
+	_, err = io.Copy(outFile, reader)
+	if err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
+}

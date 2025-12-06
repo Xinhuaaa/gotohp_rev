@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+option go_package = "app/generated";
+
+message GetDownloadUrls {
+  GetDownloadUrlsField1Type field1 = 1;
+  GetDownloadUrlsField2Type field2 = 2;
+}
+
+message GetDownloadUrlsField1Type {
+  GetDownloadUrlsField1Field1Type field1 = 1;
+}
+
+message GetDownloadUrlsField1Field1Type {
+  string media_key = 1;
+}
+
+message GetDownloadUrlsField2Type {
+  GetDownloadUrlsField2Field1Type field1 = 1;
+  GetDownloadUrlsField2Field5Type field5 = 5;
+}
+
+message GetDownloadUrlsField2Field1Type {
+  GetDownloadUrlsField2Field1Field7Type field7 = 7;
+}
+
+message GetDownloadUrlsField2Field1Field7Type {
+  GetDownloadUrlsEmpty field2 = 2;
+}
+
+message GetDownloadUrlsField2Field5Type {
+  GetDownloadUrlsEmpty field2 = 2;
+  GetDownloadUrlsEmpty field3 = 3;
+  GetDownloadUrlsField2Field5Field5Type field5 = 5;
+}
+
+message GetDownloadUrlsField2Field5Field5Type {
+  GetDownloadUrlsEmpty field1 = 1;
+  int64 field3 = 3;
+}
+
+message GetDownloadUrlsEmpty {}
+
+// Response message for GetDownloadUrls
+message GetDownloadUrlsResponse {
+  GetDownloadUrlsResponseField1 field1 = 1;
+}
+
+message GetDownloadUrlsResponseField1 {
+  GetDownloadUrlsResponseField1Field5 field5 = 5;
+}
+
+message GetDownloadUrlsResponseField1Field5 {
+  GetDownloadUrlsResponseField1Field5Field2 field2 = 2;
+}
+
+message GetDownloadUrlsResponseField1Field5Field2 {
+  string edited_url = 5;   // URL for downloading the file with applied edits
+  string original_url = 6; // URL for downloading the original file
+}
