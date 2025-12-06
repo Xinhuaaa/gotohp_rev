@@ -47,14 +47,27 @@ message GetDownloadUrlsResponse {
 }
 
 message GetDownloadUrlsResponseField1 {
-  GetDownloadUrlsResponseField1Field5 field5 = 5;
+  string media_key = 1;                           // Media key
+  GetDownloadUrlsResponseField1Field2 field2 = 2; // Metadata containing filename
+  GetDownloadUrlsResponseField1Field5 field5 = 5; // Download URLs
+}
+
+message GetDownloadUrlsResponseField1Field2 {
+  string field4 = 4; // Filename
 }
 
 message GetDownloadUrlsResponseField1Field5 {
-  GetDownloadUrlsResponseField1Field5Field2 field2 = 2;
+  GetDownloadUrlsResponseField1Field5Field2 field2 = 2; // Photo download URLs
+  GetDownloadUrlsResponseField1Field5Field3 field3 = 3; // Video download URL
 }
 
 message GetDownloadUrlsResponseField1Field5Field2 {
   string edited_url = 5;   // URL for downloading the file with applied edits
   string original_url = 6; // URL for downloading the original file
+}
+
+message GetDownloadUrlsResponseField1Field5Field3 {
+  string field1 = 1; // Device ID or identifier
+  int64 field3 = 3;  // Type indicator (4 = video)
+  string field5 = 5; // Video download URL
 }
