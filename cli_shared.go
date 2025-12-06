@@ -194,12 +194,18 @@ func runCLI() {
 				}
 			case "--width", "-w":
 				if i+1 < len(os.Args) {
-					fmt.Sscanf(os.Args[i+1], "%d", &width)
+					if _, err := fmt.Sscanf(os.Args[i+1], "%d", &width); err != nil || width <= 0 {
+						fmt.Fprintf(os.Stderr, "Warning: invalid width '%s', ignoring\n", os.Args[i+1])
+						width = 0
+					}
 					i++
 				}
 			case "--height", "-h":
 				if i+1 < len(os.Args) {
-					fmt.Sscanf(os.Args[i+1], "%d", &height)
+					if _, err := fmt.Sscanf(os.Args[i+1], "%d", &height); err != nil || height <= 0 {
+						fmt.Fprintf(os.Stderr, "Warning: invalid height '%s', ignoring\n", os.Args[i+1])
+						height = 0
+					}
 					i++
 				}
 			case "--size", "-s":
