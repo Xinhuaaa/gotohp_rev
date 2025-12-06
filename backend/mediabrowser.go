@@ -111,7 +111,12 @@ func (m *MediaBrowser) DownloadMedia(mediaKey string) (string, error) {
 					ext = ".jpg"
 				}
 			}
-			filename = fmt.Sprintf("%s%s", mediaKey[:10], ext)
+			// Safely slice mediaKey to avoid panic
+			keyPrefix := mediaKey
+			if len(mediaKey) > 10 {
+				keyPrefix = mediaKey[:10]
+			}
+			filename = fmt.Sprintf("%s%s", keyPrefix, ext)
 		}
 	}
 	outputPath := filepath.Join(downloadsDir, filename)
