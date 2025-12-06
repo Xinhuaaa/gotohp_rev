@@ -794,6 +794,25 @@ func buildGetMediaInfoRequestField1(mediaKey string) []byte {
 	return buf.Bytes()
 }
 
+// selectBetterItem compares two media items and returns the better one
+// Prefers items with filename, otherwise returns the new item if current is nil
+func selectBetterItem(current, candidate *MediaItem) *MediaItem {
+	if candidate == nil {
+		return current
+	}
+	// If candidate has filename and current doesn't, prefer candidate
+	if candidate.Filename != "" {
+		if current == nil || current.Filename == "" {
+			return candidate
+		}
+	}
+	// If current is nil, use candidate
+	if current == nil {
+		return candidate
+	}
+	return current
+}
+
 // parseMediaInfoResponse parses the protobuf response to extract media item info
 // for the target media key. Returns nil if no matching item is found.
 func parseMediaInfoResponse(data []byte, targetMediaKey string) *MediaItem {
@@ -804,14 +823,12 @@ func parseMediaInfoResponse(data []byte, targetMediaKey string) *MediaItem {
 	var matchedItem *MediaItem
 	for i := range items {
 		if items[i].MediaKey == targetMediaKey {
-			if items[i].Filename != "" {
+			candidate := &items[i]
+			if candidate.Filename != "" {
 				// Found a match with filename, return immediately
-				return &items[i]
+				return candidate
 			}
-			// Found a match but no filename, keep looking for better match
-			if matchedItem == nil {
-				matchedItem = &items[i]
-			}
+			matchedItem = selectBetterItem(matchedItem, candidate)
 		}
 	}
 
@@ -852,14 +869,10 @@ func tryExtractMediaItem(data []byte, targetMediaKey string) *MediaItem {
 			if fieldNum == 1 || fieldNum == 2 {
 				item := tryParseMediaItemWithKey(fieldData, targetMediaKey)
 				if item != nil && item.MediaKey == targetMediaKey {
-					// Prefer items with filename
 					if item.Filename != "" {
 						return item
 					}
-					// Keep as backup if no better match found
-					if result == nil || result.Filename == "" {
-						result = item
-					}
+					result = selectBetterItem(result, item)
 				}
 				// Recurse into nested messages
 				nested := tryExtractMediaItem(fieldData, targetMediaKey)
@@ -867,9 +880,7 @@ func tryExtractMediaItem(data []byte, targetMediaKey string) *MediaItem {
 					if nested.Filename != "" {
 						return nested
 					}
-					if result == nil || result.Filename == "" {
-						result = nested
-					}
+					result = selectBetterItem(result, nested)
 				}
 			}
 		case 5: // 32-bit
@@ -923,13 +934,15 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 					// Try to parse nested message
 					nested := tryParseMediaItemWithKey(fieldData, targetMediaKey)
 					if nested != nil && nested.MediaKey != "" {
-						if nested.MediaKey == targetMediaKey || item.MediaKey == "" {
+						// Only update MediaKey if it matches target or we don't have one yet
+						if item.MediaKey == "" {
 							item.MediaKey = nested.MediaKey
 						}
-						if nested.Filename != "" {
+						// Always update filename and media type if available
+						if nested.Filename != "" && item.Filename == "" {
 							item.Filename = nested.Filename
 						}
-						if nested.MediaType != "" {
+						if nested.MediaType != "" && item.MediaType == "" {
 							item.MediaType = nested.MediaType
 						}
 					}
