@@ -81,7 +81,8 @@ async function loadMediaList() {
       if (allDuplicates || !hasNextPage) {
         debugLog('Reached end of list:', allDuplicates ? 'all duplicates' : 'no next page token')
         markAsEndOfList()
-        if (allDuplicates || newItems.length === 0) {
+        // Show message if: all duplicates OR (no next page AND no new items this time)
+        if (allDuplicates || (!hasNextPage && newItems.length === 0)) {
           showEndOfListMessage()
         }
       } else {
@@ -138,7 +139,7 @@ const gridCols = computed(() => {
       <h2 class="text-xl font-semibold">Photo Gallery</h2>
       <div class="flex gap-2">
         <Button 
-          v-if="hasMore || loading" 
+          v-if="!reachedEnd || loading" 
           variant="outline" 
           @click="loadMediaList"
           :disabled="loading || reachedEnd"
