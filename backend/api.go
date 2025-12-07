@@ -1192,10 +1192,11 @@ const minMediaKeyLength = 10
 
 // GetMediaList retrieves a list of media items from the library
 // This uses a simplified request to fetch media items with pagination support
-func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
+// stateToken should be passed from previous responses for proper pagination
+func (a *Api) GetMediaList(pageToken string, stateToken string, limit int) (*MediaListResult, error) {
 	// Build the request using raw protobuf wire format
 	// The request structure is complex, so we use a helper to build it
-	requestData := buildMediaListRequest(pageToken, limit)
+	requestData := buildMediaListRequest(pageToken, stateToken, limit)
 
 	// Get the bearer token
 	bearerToken, err := a.BearerToken()
@@ -1268,12 +1269,13 @@ func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error
 }
 
 // buildMediaListRequest creates the protobuf request for fetching media list
-// This implements a simplified version of the get_library_page_init request
-func buildMediaListRequest(pageToken string, limit int) []byte {
+// When stateToken is empty, it works like get_library_page_init (first page)
+// When stateToken is provided, it works like get_library_page (subsequent pages)
+func buildMediaListRequest(pageToken string, stateToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// Build field 1 (request data)
-	field1 := buildMediaListRequestField1(pageToken, limit)
+	field1 := buildMediaListRequestField1(pageToken, stateToken, limit)
 	writeProtobufField(&buf, 1, field1)
 
 	// Build field 2 (additional options)
@@ -1283,7 +1285,7 @@ func buildMediaListRequest(pageToken string, limit int) []byte {
 	return buf.Bytes()
 }
 
-func buildMediaListRequestField1(pageToken string, limit int) []byte {
+func buildMediaListRequestField1(pageToken string, stateToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// These field numbers correspond to the Google Photos protobuf schema for media list requests
@@ -1306,6 +1308,12 @@ func buildMediaListRequestField1(pageToken string, limit int) []byte {
 	// field1.4 - page token (string)
 	if pageToken != "" {
 		writeProtobufString(&buf, 4, pageToken)
+	}
+
+	// field1.6 - state token (string) - required for proper pagination
+	// This field is present in get_library_page but not in get_library_page_init
+	if stateToken != "" {
+		writeProtobufString(&buf, 6, stateToken)
 	}
 
 	// field1.7 - type (varint = 2)
