@@ -111,12 +111,6 @@ async function loadMediaList() {
     loading.value = false
   }
 }
-      description: error?.message,
-    })
-  } finally {
-    loading.value = false
-  }
-}
 
 async function downloadMedia(mediaKey: string, filename: string) {
   if (downloadingItems.value.has(mediaKey)) return
