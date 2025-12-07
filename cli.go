@@ -509,6 +509,7 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 	finalResult := &backend.MediaListResult{
 		Items:         allItems,
 		NextPageToken: lastNextPageToken,
+		StateToken:    currentStateToken,
 	}
 
 	if jsonOutput {
