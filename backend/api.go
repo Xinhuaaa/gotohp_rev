@@ -1195,7 +1195,7 @@ const minMediaKeyLength = 10
 func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
 	// Build the request using raw protobuf wire format
 	// The request structure is complex, so we use a helper to build it
-	requestData := buildMediaListRequest(pageToken)
+	requestData := buildMediaListRequest(pageToken, limit)
 
 	// Get the bearer token
 	bearerToken, err := a.BearerToken()
@@ -1269,11 +1269,11 @@ func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error
 
 // buildMediaListRequest creates the protobuf request for fetching media list
 // This implements a simplified version of the get_library_page_init request
-func buildMediaListRequest(pageToken string) []byte {
+func buildMediaListRequest(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// Build field 1 (request data)
-	field1 := buildMediaListRequestField1(pageToken)
+	field1 := buildMediaListRequestField1(pageToken, limit)
 	writeProtobufField(&buf, 1, field1)
 
 	// Build field 2 (additional options)
@@ -1283,7 +1283,7 @@ func buildMediaListRequest(pageToken string) []byte {
 	return buf.Bytes()
 }
 
-func buildMediaListRequestField1(pageToken string) []byte {
+func buildMediaListRequestField1(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// These field numbers correspond to the Google Photos protobuf schema for media list requests
@@ -1292,6 +1292,11 @@ func buildMediaListRequestField1(pageToken string) []byte {
 	mediaMetadataFields := []int{1, 3, 4, 5, 6, 7, 15, 16, 17, 19, 20, 21, 25, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41}
 	field1_1 := buildEmptyNestedMessage(mediaMetadataFields)
 	writeProtobufField(&buf, 1, field1_1)
+
+	// field1.2 - page size limit (varint)
+	if limit > 0 {
+		writeProtobufVarint(&buf, 2, int64(limit))
+	}
 
 	// field1.3 - album and collection options
 	albumOptions := []int{2, 3, 7, 8, 14, 16, 17, 18, 19, 20, 21, 22, 23, 27, 29, 30, 31, 32, 34, 37, 38, 39, 41}

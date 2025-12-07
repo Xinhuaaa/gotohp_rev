@@ -22,7 +22,7 @@ func isCLICommand(arg string) bool {
 		"upload",
 		"download",
 		"thumbnail", "thumb", // Get thumbnail at various sizes
-		"list", "ls",         // List media items
+		"list", "ls", // List media items
 		"credentials", "creds", // Support both full and short form
 		"help", "--help", "-h",
 		"version", "--version", "-v",
@@ -246,9 +246,9 @@ func runCLI() {
 
 		// Parse flags
 		configPath := ""
-		limit := 0           // 0 means no limit
-		pages := 1           // Default to 1 page
-		maxEmptyPages := 10  // Default max empty page retries
+		limit := 0          // 0 means no limit
+		pages := 1          // Default to 1 page
+		maxEmptyPages := 10 // Default max empty page retries
 		pageToken := ""
 		jsonOutput := false
 

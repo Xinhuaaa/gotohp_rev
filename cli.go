@@ -445,9 +445,9 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 	// Collect all items across pages
 	var allItems []backend.MediaItem
 	currentPageToken := pageToken
-	lastNextPageToken := ""        // Track the next page token from the last API response
+	lastNextPageToken := "" // Track the next page token from the last API response
 	pagesRequested := 0
-	emptyPageRetries := 0          // Count consecutive empty pages
+	emptyPageRetries := 0 // Count consecutive empty pages
 
 	for pagesRequested < pages {
 		// Get media list

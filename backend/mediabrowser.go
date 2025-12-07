@@ -134,5 +134,3 @@ func (m *MediaBrowser) DownloadMedia(mediaKey string) (string, error) {
 
 	return outputPath, nil
 }
-
-
