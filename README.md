@@ -66,6 +66,17 @@ gotohp-cli.exe version
   - `--overlay` - Include overlay (e.g., play symbol for videos)
   - `--png` - Get PNG format instead of JPEG
   - `-c, --config <path>` - Path to config file
+- `list` (alias: `ls`) - List media items in Google Photos
+  - `-n, --limit <n>` - Maximum number of items per page
+  - `--pages <n>` - Number of pages to fetch (default: 1)
+  - `-p, --page-token <t>` - Page token for pagination
+  - `-j, --json` - Output in JSON format
+  - `-c, --config <path>` - Path to config file
+- `albums` - List albums in Google Photos
+  - `--pages <n>` - Number of pages to fetch (default: 1)
+  - `--page-token <t>` - Page token for pagination
+  - `-j, --json` - Output in JSON format
+  - `-c, --config <path>` - Path to config file
 - `creds list` (alias: `ls`) - List all credentials
 - `creds add <auth-string>` - Add new credentials
 - `creds remove <email>` (alias: `rm`) - Remove credentials
@@ -81,6 +92,8 @@ The main executable supports CLI mode:
 ./gotohp upload /path/to/photos --recursive --threads 5
 ./gotohp creds list
 ./gotohp thumbnail <media-key> --size large
+./gotohp list --pages 2
+./gotohp albums --pages 1
 ./gotohp version
 ```
 

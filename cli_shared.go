@@ -23,6 +23,7 @@ func isCLICommand(arg string) bool {
 		"download",
 		"thumbnail", "thumb", // Get thumbnail at various sizes
 		"list", "ls", // List media items
+		"albums", // List albums
 		"credentials", "creds", // Support both full and short form
 		"help", "--help", "-h",
 		"version", "--version", "-v",
@@ -308,6 +309,99 @@ func runCLI() {
 			os.Exit(1)
 		}
 
+	case "albums":
+		// Check for help flag first
+		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
+			printAlbumsHelp()
+			return
+		}
+
+		// Parse flags
+		configPath := ""
+		pages := 1 // Default to 1 page
+		pageToken := ""
+		jsonOutput := false
+
+		for i := 2; i < len(os.Args); i++ {
+			switch os.Args[i] {
+			case "--config", "-c":
+				if i+1 < len(os.Args) {
+					configPath = os.Args[i+1]
+					i++
+				}
+			case "--pages":
+				if i+1 < len(os.Args) {
+					_, err := fmt.Sscanf(os.Args[i+1], "%d", &pages)
+					if err != nil || pages < 1 {
+						fmt.Fprintf(os.Stderr, "Warning: invalid pages value '%s', using 1\n", os.Args[i+1])
+						pages = 1
+					}
+					i++
+				}
+			case "--page-token":
+				if i+1 < len(os.Args) {
+					pageToken = os.Args[i+1]
+					i++
+				}
+			case "--json", "-j":
+				jsonOutput = true
+			default:
+				fmt.Fprintf(os.Stderr, "Warning: unknown flag '%s'\n", os.Args[i])
+			}
+		}
+
+		if configPath != "" {
+			backend.ConfigPath = configPath
+		}
+
+		err := backend.LoadConfig()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+			os.Exit(1)
+		}
+
+		mediaBrowser := &backend.MediaBrowser{}
+		currentPageToken := pageToken
+
+		for page := 0; page < pages; page++ {
+			result, err := mediaBrowser.GetAlbumList(currentPageToken)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to get album list: %v\n", err)
+				os.Exit(1)
+			}
+
+			if jsonOutput {
+				fmt.Printf("%+v\n", result)
+			} else {
+				if page == 0 {
+					fmt.Printf("Albums (Page %d):\n", page+1)
+				} else {
+					fmt.Printf("\nAlbums (Page %d):\n", page+1)
+				}
+				for i, album := range result.Albums {
+					fmt.Printf("%d. %s\n", i+1, album.Title)
+					fmt.Printf("   Key: %s\n", album.AlbumKey)
+					if album.MediaCount > 0 {
+						fmt.Printf("   Media Count: %d\n", album.MediaCount)
+					}
+				}
+				fmt.Printf("\nTotal albums on this page: %d\n", len(result.Albums))
+				if result.NextPageToken != "" {
+					fmt.Printf("Next page token: %s\n", result.NextPageToken)
+				}
+			}
+
+			// Check if there are more pages
+			if result.NextPageToken == "" {
+				if !jsonOutput && page+1 < pages {
+					fmt.Println("\nNo more pages available.")
+				}
+				break
+			}
+
+			currentPageToken = result.NextPageToken
+		}
+
 	case "credentials", "creds":
 		if len(os.Args) < 3 {
 			fmt.Println("Error: subcommand required")
@@ -362,6 +456,7 @@ func printCLIHelp() {
 	fmt.Println("  download <media-key> Download a file from Google Photos")
 	fmt.Println("  thumbnail <media-key> Download a thumbnail at various sizes")
 	fmt.Println("  list, ls            List media items in Google Photos")
+	fmt.Println("  albums              List albums in Google Photos")
 	fmt.Println("  creds               Manage Google Photos credentials")
 	fmt.Println("  help                Show this help message")
 	fmt.Println("  version             Show version information")
@@ -419,6 +514,21 @@ func printListHelp() {
 	fmt.Println("  -c, --config <path>      Path to config file")
 	fmt.Println()
 	fmt.Println("If a page returns 0 items, the next page will be fetched automatically.")
+}
+
+func printAlbumsHelp() {
+	fmt.Println("Usage: gotohp albums [flags]")
+	fmt.Println()
+	fmt.Println("List albums in your Google Photos library.")
+	fmt.Println()
+	fmt.Println("Flags:")
+	fmt.Println("  --pages <n>              Number of pages to fetch (default: 1)")
+	fmt.Println("  --page-token <t>         Page token for pagination")
+	fmt.Println("  -j, --json               Output in JSON format")
+	fmt.Println("  -c, --config <path>      Path to config file")
+	fmt.Println()
+	fmt.Println("Note: The album list uses a fixed request format where only the page")
+	fmt.Println("      token changes between requests.")
 }
 
 func printCredentialsHelp() {

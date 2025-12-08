@@ -33,6 +33,22 @@ func (m *MediaBrowser) GetMediaList(pageToken string, limit int) (*MediaListResu
 	return result, nil
 }
 
+// GetAlbumList retrieves a paginated list of albums
+func (m *MediaBrowser) GetAlbumList(pageToken string) (*AlbumListResult, error) {
+	// Create a new API client for each request
+	api, err := NewApi()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create API client: %w", err)
+	}
+
+	result, err := api.GetAlbumList(pageToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get album list: %w", err)
+	}
+
+	return result, nil
+}
+
 // GetThumbnail retrieves a thumbnail for a media item and returns it as base64
 func (m *MediaBrowser) GetThumbnail(mediaKey string, size string) (string, error) {
 	api, err := NewApi()
