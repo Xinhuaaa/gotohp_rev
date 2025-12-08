@@ -1185,6 +1185,19 @@ type MediaListResult struct {
 	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.1
 }
 
+// AlbumItem represents a single album in Google Photos
+type AlbumItem struct {
+	AlbumKey  string `json:"albumKey"`
+	Title     string `json:"title,omitempty"`
+	MediaCount int   `json:"mediaCount,omitempty"`
+}
+
+// AlbumListResult contains the result of an album list request
+type AlbumListResult struct {
+	Albums        []AlbumItem `json:"albums"`
+	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.4
+}
+
 // minMediaKeyLength is the minimum expected length for a valid media key string
 // Google Photos media keys are typically base64-encoded identifiers > 10 chars
 const minMediaKeyLength = 10
@@ -1668,4 +1681,1066 @@ func isPrintableString(data []byte) bool {
 		i += size
 	}
 	return true
+}
+
+// GetAlbumList retrieves a list of albums from Google Photos
+// This uses a specific protobuf format for requesting album lists
+// pageToken should be passed from previous responses for proper pagination
+func (a *Api) GetAlbumList(pageToken string) (*AlbumListResult, error) {
+	// Build the request using the exact protobuf structure
+	requestData := buildAlbumListRequest(pageToken)
+
+	// Get the bearer token
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	// Prepare headers
+	headers := map[string]string{
+		"accept-encoding":          "gzip",
+		"Accept-Language":          a.language,
+		"Content-Type":             "application/x-protobuf",
+		"User-Agent":               a.userAgent,
+		"Authorization":            "Bearer " + bearerToken,
+		"x-goog-ext-173412678-bin": "CgcIAhClARgC",
+		"x-goog-ext-174067345-bin": "CgIIAg==",
+	}
+
+	// Create the request
+	req, err := http.NewRequest(
+		"POST",
+		"https://photosdata-pa.googleapis.com/6439526531001121323/18047484249733410717",
+		bytes.NewReader(requestData),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	// Make the request
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Handle gzip response if needed
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer reader.(*gzip.Reader).Close()
+	}
+
+	// Read the response body
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Parse the response to extract albums
+	result, err := parseAlbumListResponse(bodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return result, nil
+}
+
+// buildAlbumListRequest creates the protobuf request for fetching album list
+// According to the provided format, only field 1.4 (pageToken) changes between requests
+func buildAlbumListRequest(pageToken string) []byte {
+var buf bytes.Buffer
+
+// Build field 1 (main request data)
+field1 := buildAlbumListRequestField1(pageToken)
+writeProtobufField(&buf, 1, field1)
+
+// Build field 2 (additional options)
+field2 := buildAlbumListRequestField2()
+writeProtobufField(&buf, 2, field2)
+
+return buf.Bytes()
+}
+
+// buildAlbumListRequestField1 builds the complex nested field 1 structure
+func buildAlbumListRequestField1(pageToken string) []byte {
+var buf bytes.Buffer
+
+// field 1.1 - nested message with media/album metadata options
+field1_1 := buildAlbumListField1_1()
+writeProtobufField(&buf, 1, field1_1)
+
+// field 1.2 - nested message with various options
+field1_2 := buildAlbumListField1_2()
+writeProtobufField(&buf, 2, field1_2)
+
+// field 1.3 - nested message with collection options
+field1_3 := buildAlbumListField1_3()
+writeProtobufField(&buf, 3, field1_3)
+
+// field 1.4 - pagination token (string) - THE ONLY FIELD THAT CHANGES
+if pageToken != "" {
+writeProtobufString(&buf, 4, pageToken)
+}
+
+// field 1.7 - type (varint = 2)
+writeProtobufVarint(&buf, 7, 2)
+
+// field 1.9 - nested message
+field1_9 := buildAlbumListField1_9()
+writeProtobufField(&buf, 9, field1_9)
+
+// field 1.11 - repeated ints [1, 2, 6]
+writeProtobufVarint(&buf, 11, 1)
+writeProtobufVarint(&buf, 11, 2)
+writeProtobufVarint(&buf, 11, 6)
+
+// field 1.12 - nested message
+field1_12 := buildAlbumListField1_12()
+writeProtobufField(&buf, 12, field1_12)
+
+// field 1.13 - empty string
+writeProtobufString(&buf, 13, "")
+
+// field 1.15 - nested message
+field1_15 := buildAlbumListField1_15()
+writeProtobufField(&buf, 15, field1_15)
+
+// field 1.18 - nested message with specific ID
+field1_18 := buildAlbumListField1_18()
+writeProtobufField(&buf, 18, field1_18)
+
+// field 1.19 - nested message
+field1_19 := buildAlbumListField1_19()
+writeProtobufField(&buf, 19, field1_19)
+
+// field 1.20 - nested message
+field1_20 := buildAlbumListField1_20()
+writeProtobufField(&buf, 20, field1_20)
+
+// field 1.21 - nested message
+field1_21 := buildAlbumListField1_21()
+writeProtobufField(&buf, 21, field1_21)
+
+// field 1.22 - nested message
+field1_22 := buildAlbumListField1_22()
+writeProtobufField(&buf, 22, field1_22)
+
+// field 1.25 - nested message
+field1_25 := buildAlbumListField1_25()
+writeProtobufField(&buf, 25, field1_25)
+
+// field 1.26 - empty string
+writeProtobufString(&buf, 26, "")
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_1 builds field 1.1 - media/album metadata options
+func buildAlbumListField1_1() []byte {
+var buf bytes.Buffer
+
+// field 1.1.1 - nested message with all metadata fields
+var field1_1_1 bytes.Buffer
+
+// Empty fields: 1, 3, 4, 6, 15, 16, 17, 19, 20, 25, 31, 32, 34, 36, 37, 38, 39, 40, 41, 42
+emptyFields := []int{1, 3, 4, 6, 15, 16, 17, 19, 20, 25, 31, 32, 34, 36, 37, 38, 39, 40, 41, 42}
+for _, f := range emptyFields {
+writeProtobufString(&field1_1_1, f, "")
+}
+
+// field 1.1.1.5 - nested message
+var field5 bytes.Buffer
+for _, f := range []int{1, 2, 3, 4, 5, 7} {
+writeProtobufString(&field5, f, "")
+}
+writeProtobufField(&field1_1_1, 5, field5.Bytes())
+
+// field 1.1.1.7 - nested message
+var field7 bytes.Buffer
+writeProtobufString(&field7, 2, "")
+writeProtobufField(&field1_1_1, 7, field7.Bytes())
+
+// field 1.1.1.21 - nested message
+var field21 bytes.Buffer
+var field21_5 bytes.Buffer
+writeProtobufString(&field21_5, 3, "")
+writeProtobufField(&field21, 5, field21_5.Bytes())
+writeProtobufString(&field21, 6, "")
+var field21_7 bytes.Buffer
+writeProtobufVarint(&field21_7, 2, 0)
+writeProtobufVarint(&field21_7, 3, 1)
+writeProtobufField(&field21, 7, field21_7.Bytes())
+writeProtobufField(&field1_1_1, 21, field21.Bytes())
+
+// field 1.1.1.30 - nested message
+var field30 bytes.Buffer
+writeProtobufString(&field30, 2, "")
+writeProtobufField(&field1_1_1, 30, field30.Bytes())
+
+// field 1.1.1.33 - nested message
+var field33 bytes.Buffer
+writeProtobufString(&field33, 1, "")
+writeProtobufField(&field1_1_1, 33, field33.Bytes())
+
+writeProtobufField(&buf, 1, field1_1_1.Bytes())
+return buf.Bytes()
+}
+
+// buildAlbumListField1_2 builds field 1.2 - complex nested options
+func buildAlbumListField1_2() []byte {
+var buf bytes.Buffer
+
+// field 1.2.1 - nested message
+var field1_2_1 bytes.Buffer
+for _, f := range []int{2, 3, 4, 5, 7, 8, 10, 12, 18} {
+writeProtobufString(&field1_2_1, f, "")
+}
+
+// field 1.2.1.6 - nested
+var field1_2_1_6 bytes.Buffer
+for _, f := range []int{1, 2, 3, 4, 5, 7} {
+writeProtobufString(&field1_2_1_6, f, "")
+}
+writeProtobufField(&field1_2_1, 6, field1_2_1_6.Bytes())
+
+// field 1.2.1.13 - nested
+var field1_2_1_13 bytes.Buffer
+writeProtobufString(&field1_2_1_13, 2, "")
+writeProtobufString(&field1_2_1_13, 3, "")
+writeProtobufField(&field1_2_1, 13, field1_2_1_13.Bytes())
+
+// field 1.2.1.15 - nested
+var field1_2_1_15 bytes.Buffer
+writeProtobufString(&field1_2_1_15, 1, "")
+writeProtobufField(&field1_2_1, 15, field1_2_1_15.Bytes())
+
+writeProtobufField(&buf, 1, field1_2_1.Bytes())
+
+// field 1.2.4 - nested
+var field1_2_4 bytes.Buffer
+var field1_2_4_1 bytes.Buffer
+writeProtobufString(&field1_2_4_1, 1, "")
+writeProtobufField(&field1_2_4, 1, field1_2_4_1.Bytes())
+writeProtobufField(&buf, 4, field1_2_4.Bytes())
+
+// field 1.2.9 - empty
+writeProtobufString(&buf, 9, "")
+
+// field 1.2.11 - nested
+var field1_2_11 bytes.Buffer
+var field1_2_11_1 bytes.Buffer
+for _, f := range []int{1, 4, 5, 6, 9} {
+writeProtobufString(&field1_2_11_1, f, "")
+}
+writeProtobufField(&field1_2_11, 1, field1_2_11_1.Bytes())
+writeProtobufField(&buf, 11, field1_2_11.Bytes())
+
+// field 1.2.14 - complex nested
+var field1_2_14 bytes.Buffer
+var field1_2_14_1 bytes.Buffer
+
+// field 1.2.14.1.1
+var field1_2_14_1_1 bytes.Buffer
+writeProtobufString(&field1_2_14_1_1, 1, "")
+
+// field 1.2.14.1.1.2
+var field1_2_14_1_1_2 bytes.Buffer
+var field1_2_14_1_1_2_2 bytes.Buffer
+var field1_2_14_1_1_2_2_1 bytes.Buffer
+writeProtobufString(&field1_2_14_1_1_2_2_1, 1, "")
+writeProtobufField(&field1_2_14_1_1_2_2, 1, field1_2_14_1_1_2_2_1.Bytes())
+writeProtobufString(&field1_2_14_1_1_2_2, 3, "")
+writeProtobufField(&field1_2_14_1_1_2, 2, field1_2_14_1_1_2_2.Bytes())
+writeProtobufField(&field1_2_14_1_1, 2, field1_2_14_1_1_2.Bytes())
+
+// field 1.2.14.1.1.3
+var field1_2_14_1_1_3 bytes.Buffer
+
+// field 1.2.14.1.1.3.4
+var field1_2_14_1_1_3_4 bytes.Buffer
+var field1_2_14_1_1_3_4_1 bytes.Buffer
+writeProtobufString(&field1_2_14_1_1_3_4_1, 1, "")
+writeProtobufField(&field1_2_14_1_1_3_4, 1, field1_2_14_1_1_3_4_1.Bytes())
+writeProtobufString(&field1_2_14_1_1_3_4, 3, "")
+writeProtobufField(&field1_2_14_1_1_3, 4, field1_2_14_1_1_3_4.Bytes())
+
+// field 1.2.14.1.1.3.5
+var field1_2_14_1_1_3_5 bytes.Buffer
+var field1_2_14_1_1_3_5_1 bytes.Buffer
+writeProtobufString(&field1_2_14_1_1_3_5_1, 1, "")
+writeProtobufField(&field1_2_14_1_1_3_5, 1, field1_2_14_1_1_3_5_1.Bytes())
+writeProtobufString(&field1_2_14_1_1_3_5, 3, "")
+writeProtobufField(&field1_2_14_1_1_3, 5, field1_2_14_1_1_3_5.Bytes())
+
+writeProtobufField(&field1_2_14_1_1, 3, field1_2_14_1_1_3.Bytes())
+writeProtobufField(&field1_2_14_1, 1, field1_2_14_1_1.Bytes())
+writeProtobufString(&field1_2_14_1, 2, "")
+writeProtobufField(&field1_2_14, 1, field1_2_14_1.Bytes())
+writeProtobufField(&buf, 14, field1_2_14.Bytes())
+
+// field 1.2.17 - empty
+writeProtobufString(&buf, 17, "")
+
+// field 1.2.18 - nested
+var field1_2_18 bytes.Buffer
+writeProtobufString(&field1_2_18, 1, "")
+var field1_2_18_2 bytes.Buffer
+writeProtobufString(&field1_2_18_2, 1, "")
+writeProtobufField(&field1_2_18, 2, field1_2_18_2.Bytes())
+writeProtobufField(&buf, 18, field1_2_18.Bytes())
+
+// field 1.2.20 - nested
+var field1_2_20 bytes.Buffer
+var field1_2_20_2 bytes.Buffer
+writeProtobufString(&field1_2_20_2, 1, "")
+writeProtobufString(&field1_2_20_2, 2, "")
+writeProtobufField(&field1_2_20, 2, field1_2_20_2.Bytes())
+writeProtobufField(&buf, 20, field1_2_20.Bytes())
+
+// field 1.2.22 and 1.2.23 - empty
+writeProtobufString(&buf, 22, "")
+writeProtobufString(&buf, 23, "")
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_3 builds field 1.3 - collection options
+func buildAlbumListField1_3() []byte {
+var buf bytes.Buffer
+
+// field 1.3.2 - empty
+writeProtobufString(&buf, 2, "")
+
+// field 1.3.3 - nested with many empty fields
+var field1_3_3 bytes.Buffer
+emptyFields := []int{2, 3, 7, 8, 16, 18, 19, 20, 21, 22, 23, 29, 30, 31, 32, 34, 37, 38, 39, 41, 47}
+for _, f := range emptyFields {
+writeProtobufString(&field1_3_3, f, "")
+}
+
+// field 1.3.3.14
+var field1_3_3_14 bytes.Buffer
+writeProtobufString(&field1_3_3_14, 1, "")
+writeProtobufField(&field1_3_3, 14, field1_3_3_14.Bytes())
+
+// field 1.3.3.17
+var field1_3_3_17 bytes.Buffer
+writeProtobufString(&field1_3_3_17, 2, "")
+writeProtobufField(&field1_3_3, 17, field1_3_3_17.Bytes())
+
+// field 1.3.3.27
+var field1_3_3_27 bytes.Buffer
+writeProtobufString(&field1_3_3_27, 1, "")
+var field1_3_3_27_2 bytes.Buffer
+writeProtobufString(&field1_3_3_27_2, 1, "")
+writeProtobufField(&field1_3_3_27, 2, field1_3_3_27_2.Bytes())
+writeProtobufField(&field1_3_3, 27, field1_3_3_27.Bytes())
+
+// field 1.3.3.45
+var field1_3_3_45 bytes.Buffer
+var field1_3_3_45_1 bytes.Buffer
+writeProtobufString(&field1_3_3_45_1, 1, "")
+writeProtobufField(&field1_3_3_45, 1, field1_3_3_45_1.Bytes())
+writeProtobufField(&field1_3_3, 45, field1_3_3_45.Bytes())
+
+// field 1.3.3.46
+var field1_3_3_46 bytes.Buffer
+writeProtobufString(&field1_3_3_46, 1, "")
+var field1_3_3_46_2 bytes.Buffer
+var field1_3_3_46_2_1 bytes.Buffer
+writeProtobufString(&field1_3_3_46_2_1, 1, "")
+writeProtobufField(&field1_3_3_46_2, 1, field1_3_3_46_2_1.Bytes())
+writeProtobufField(&field1_3_3_46, 2, field1_3_3_46_2.Bytes())
+writeProtobufString(&field1_3_3_46, 3, "")
+writeProtobufField(&field1_3_3, 46, field1_3_3_46.Bytes())
+
+writeProtobufField(&buf, 3, field1_3_3.Bytes())
+
+// field 1.3.4 - nested
+var field1_3_4 bytes.Buffer
+writeProtobufString(&field1_3_4, 2, "")
+var field1_3_4_3 bytes.Buffer
+writeProtobufString(&field1_3_4_3, 1, "")
+writeProtobufField(&field1_3_4, 3, field1_3_4_3.Bytes())
+writeProtobufString(&field1_3_4, 4, "")
+var field1_3_4_5 bytes.Buffer
+writeProtobufString(&field1_3_4_5, 1, "")
+writeProtobufField(&field1_3_4, 5, field1_3_4_5.Bytes())
+writeProtobufField(&buf, 4, field1_3_4.Bytes())
+
+// field 1.3.7 - empty
+writeProtobufString(&buf, 7, "")
+
+// field 1.3.8 - nested
+var field1_3_8 bytes.Buffer
+var field1_3_8_2 bytes.Buffer
+writeProtobufVarint(&field1_3_8_2, 1, 1)
+writeProtobufVarint(&field1_3_8_2, 2, 1)
+writeProtobufField(&field1_3_8, 2, field1_3_8_2.Bytes())
+writeProtobufField(&buf, 8, field1_3_8.Bytes())
+
+// fields 1.3.12, 1.3.13, 1.3.15, 1.3.18, 1.3.20, 1.3.22, 1.3.24, 1.3.25
+for _, f := range []int{12, 13, 15, 18, 20, 22, 24, 25} {
+writeProtobufString(&buf, f, "")
+}
+
+// field 1.3.14 - complex nested
+field1_3_14 := buildAlbumListField1_3_14()
+writeProtobufField(&buf, 14, field1_3_14)
+
+// field 1.3.16 - nested
+var field1_3_16 bytes.Buffer
+writeProtobufString(&field1_3_16, 1, "")
+writeProtobufField(&buf, 16, field1_3_16.Bytes())
+
+// field 1.3.19 - nested
+field1_3_19 := buildAlbumListField1_3_19()
+writeProtobufField(&buf, 19, field1_3_19)
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_3_14 builds the complex nested field 1.3.14
+func buildAlbumListField1_3_14() []byte {
+var buf bytes.Buffer
+
+// field 1.3.14.1 - empty
+writeProtobufString(&buf, 1, "")
+
+// field 1.3.14.2 - nested
+var field1_3_14_2 bytes.Buffer
+writeProtobufString(&field1_3_14_2, 1, "")
+var field1_3_14_2_2 bytes.Buffer
+writeProtobufString(&field1_3_14_2_2, 1, "")
+writeProtobufField(&field1_3_14_2, 2, field1_3_14_2_2.Bytes())
+writeProtobufString(&field1_3_14_2, 3, "")
+var field1_3_14_2_4 bytes.Buffer
+writeProtobufString(&field1_3_14_2_4, 1, "")
+writeProtobufField(&field1_3_14_2, 4, field1_3_14_2_4.Bytes())
+writeProtobufField(&buf, 2, field1_3_14_2.Bytes())
+
+// field 1.3.14.3 - nested
+var field1_3_14_3 bytes.Buffer
+writeProtobufString(&field1_3_14_3, 1, "")
+var field1_3_14_3_2 bytes.Buffer
+writeProtobufString(&field1_3_14_3_2, 1, "")
+writeProtobufField(&field1_3_14_3, 2, field1_3_14_3_2.Bytes())
+writeProtobufString(&field1_3_14_3, 3, "")
+writeProtobufString(&field1_3_14_3, 4, "")
+writeProtobufField(&buf, 3, field1_3_14_3.Bytes())
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_3_19 builds field 1.3.19
+func buildAlbumListField1_3_19() []byte {
+var buf bytes.Buffer
+
+// field 1.3.19.4 - nested
+var field1_3_19_4 bytes.Buffer
+writeProtobufString(&field1_3_19_4, 2, "")
+writeProtobufField(&buf, 4, field1_3_19_4.Bytes())
+
+// field 1.3.19.6 - nested
+var field1_3_19_6 bytes.Buffer
+writeProtobufString(&field1_3_19_6, 2, "")
+writeProtobufString(&field1_3_19_6, 3, "")
+writeProtobufField(&buf, 6, field1_3_19_6.Bytes())
+
+// field 1.3.19.7 - nested
+var field1_3_19_7 bytes.Buffer
+writeProtobufString(&field1_3_19_7, 2, "")
+writeProtobufString(&field1_3_19_7, 3, "")
+writeProtobufField(&buf, 7, field1_3_19_7.Bytes())
+
+// field 1.3.19.8 - empty
+writeProtobufString(&buf, 8, "")
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_9 builds field 1.9
+func buildAlbumListField1_9() []byte {
+var buf bytes.Buffer
+
+// field 1.9.1 - nested
+var field1_9_1 bytes.Buffer
+var field1_9_1_2 bytes.Buffer
+writeProtobufString(&field1_9_1_2, 1, "")
+writeProtobufString(&field1_9_1_2, 2, "")
+writeProtobufField(&field1_9_1, 2, field1_9_1_2.Bytes())
+writeProtobufField(&buf, 1, field1_9_1.Bytes())
+
+// field 1.9.2 - nested
+var field1_9_2 bytes.Buffer
+var field1_9_2_3 bytes.Buffer
+writeProtobufVarint(&field1_9_2_3, 2, 1)
+writeProtobufField(&field1_9_2, 3, field1_9_2_3.Bytes())
+writeProtobufField(&buf, 2, field1_9_2.Bytes())
+
+// field 1.9.3 - nested
+var field1_9_3 bytes.Buffer
+writeProtobufString(&field1_9_3, 2, "")
+writeProtobufField(&buf, 3, field1_9_3.Bytes())
+
+// field 1.9.4 - empty
+writeProtobufString(&buf, 4, "")
+
+// field 1.9.7 - nested
+var field1_9_7 bytes.Buffer
+writeProtobufString(&field1_9_7, 1, "")
+writeProtobufField(&buf, 7, field1_9_7.Bytes())
+
+// field 1.9.8 - nested
+var field1_9_8 bytes.Buffer
+writeProtobufVarint(&field1_9_8, 1, 2)
+// repeated field
+for _, v := range []int64{1, 2, 3, 5, 6} {
+writeProtobufVarint(&field1_9_8, 2, v)
+}
+writeProtobufField(&buf, 8, field1_9_8.Bytes())
+
+// field 1.9.9 - empty
+writeProtobufString(&buf, 9, "")
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_12 builds field 1.12
+func buildAlbumListField1_12() []byte {
+var buf bytes.Buffer
+
+// field 1.12.2 - nested
+var field1_12_2 bytes.Buffer
+writeProtobufString(&field1_12_2, 1, "")
+writeProtobufString(&field1_12_2, 2, "")
+writeProtobufField(&buf, 2, field1_12_2.Bytes())
+
+// field 1.12.3 - nested
+var field1_12_3 bytes.Buffer
+writeProtobufString(&field1_12_3, 1, "")
+writeProtobufField(&buf, 3, field1_12_3.Bytes())
+
+// field 1.12.4 - empty
+writeProtobufString(&buf, 4, "")
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_15 builds field 1.15
+func buildAlbumListField1_15() []byte {
+var buf bytes.Buffer
+
+// field 1.15.3 - nested
+var field1_15_3 bytes.Buffer
+writeProtobufVarint(&field1_15_3, 1, 1)
+writeProtobufField(&buf, 3, field1_15_3.Bytes())
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_18 builds field 1.18
+func buildAlbumListField1_18() []byte {
+var buf bytes.Buffer
+
+// field 1.18 contains a specific ID (169945741) as the field number
+var field169945741 bytes.Buffer
+var field169945741_1 bytes.Buffer
+var field169945741_1_1 bytes.Buffer
+
+// repeated field
+for _, v := range []int64{2, 1, 6, 8, 10, 15, 18, 13, 17, 19, 14, 20} {
+writeProtobufVarint(&field169945741_1_1, 4, v)
+}
+writeProtobufVarint(&field169945741_1_1, 5, 6)
+writeProtobufVarint(&field169945741_1_1, 6, 2)
+writeProtobufVarint(&field169945741_1_1, 7, 1)
+writeProtobufVarint(&field169945741_1_1, 8, 2)
+writeProtobufVarint(&field169945741_1_1, 11, 3)
+writeProtobufVarint(&field169945741_1_1, 12, 1)
+writeProtobufVarint(&field169945741_1_1, 13, 3)
+writeProtobufVarint(&field169945741_1_1, 15, 1)
+writeProtobufVarint(&field169945741_1_1, 16, 1)
+writeProtobufVarint(&field169945741_1_1, 17, 1)
+writeProtobufVarint(&field169945741_1_1, 18, 2)
+
+writeProtobufField(&field169945741_1, 1, field169945741_1_1.Bytes())
+writeProtobufField(&field169945741, 1, field169945741_1.Bytes())
+writeProtobufField(&buf, 169945741, field169945741.Bytes())
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_19 builds field 1.19
+func buildAlbumListField1_19() []byte {
+var buf bytes.Buffer
+
+// field 1.19.1 - nested
+var field1_19_1 bytes.Buffer
+writeProtobufString(&field1_19_1, 1, "")
+writeProtobufString(&field1_19_1, 2, "")
+writeProtobufField(&buf, 1, field1_19_1.Bytes())
+
+// field 1.19.2 - nested with repeated
+var field1_19_2 bytes.Buffer
+for _, v := range []int64{1, 2, 4, 6, 5, 7} {
+writeProtobufVarint(&field1_19_2, 1, v)
+}
+writeProtobufField(&buf, 2, field1_19_2.Bytes())
+
+// field 1.19.3 - nested
+var field1_19_3 bytes.Buffer
+writeProtobufString(&field1_19_3, 1, "")
+writeProtobufString(&field1_19_3, 2, "")
+writeProtobufField(&buf, 3, field1_19_3.Bytes())
+
+// field 1.19.5 - nested
+var field1_19_5 bytes.Buffer
+writeProtobufString(&field1_19_5, 1, "")
+writeProtobufString(&field1_19_5, 2, "")
+writeProtobufField(&buf, 5, field1_19_5.Bytes())
+
+// field 1.19.6 - nested
+var field1_19_6 bytes.Buffer
+writeProtobufString(&field1_19_6, 1, "")
+writeProtobufField(&buf, 6, field1_19_6.Bytes())
+
+// field 1.19.7 - nested
+var field1_19_7 bytes.Buffer
+writeProtobufString(&field1_19_7, 1, "")
+writeProtobufString(&field1_19_7, 2, "")
+writeProtobufField(&buf, 7, field1_19_7.Bytes())
+
+// field 1.19.8 - nested
+var field1_19_8 bytes.Buffer
+writeProtobufString(&field1_19_8, 1, "")
+writeProtobufField(&buf, 8, field1_19_8.Bytes())
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_20 builds field 1.20
+func buildAlbumListField1_20() []byte {
+var buf bytes.Buffer
+
+// field 1.20.1
+writeProtobufVarint(&buf, 1, 1)
+
+// field 1.20.3 - nested
+var field1_20_3 bytes.Buffer
+writeProtobufString(&field1_20_3, 1, "type.googleapis.com/photos.printing.client.PrintingPromotionSyncOptions")
+
+var field1_20_3_2 bytes.Buffer
+var field1_20_3_2_1 bytes.Buffer
+
+// repeated field
+for _, v := range []int64{2, 1, 6, 8, 10, 15, 18, 13, 17, 19, 14, 20} {
+writeProtobufVarint(&field1_20_3_2_1, 4, v)
+}
+writeProtobufVarint(&field1_20_3_2_1, 5, 6)
+writeProtobufVarint(&field1_20_3_2_1, 6, 2)
+writeProtobufVarint(&field1_20_3_2_1, 7, 1)
+writeProtobufVarint(&field1_20_3_2_1, 8, 2)
+writeProtobufVarint(&field1_20_3_2_1, 11, 3)
+writeProtobufVarint(&field1_20_3_2_1, 12, 1)
+writeProtobufVarint(&field1_20_3_2_1, 13, 3)
+writeProtobufVarint(&field1_20_3_2_1, 15, 1)
+writeProtobufVarint(&field1_20_3_2_1, 16, 1)
+writeProtobufVarint(&field1_20_3_2_1, 17, 1)
+writeProtobufVarint(&field1_20_3_2_1, 18, 2)
+
+writeProtobufField(&field1_20_3_2, 1, field1_20_3_2_1.Bytes())
+writeProtobufField(&field1_20_3, 2, field1_20_3_2.Bytes())
+writeProtobufField(&buf, 3, field1_20_3.Bytes())
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_21 builds field 1.21
+func buildAlbumListField1_21() []byte {
+var buf bytes.Buffer
+
+// field 1.21.2 - nested
+var field1_21_2 bytes.Buffer
+writeProtobufString(&field1_21_2, 2, "")
+writeProtobufString(&field1_21_2, 4, "")
+writeProtobufString(&field1_21_2, 5, "")
+writeProtobufField(&buf, 2, field1_21_2.Bytes())
+
+// field 1.21.3 - nested
+var field1_21_3 bytes.Buffer
+var field1_21_3_2 bytes.Buffer
+writeProtobufVarint(&field1_21_3_2, 1, 1)
+writeProtobufField(&field1_21_3, 2, field1_21_3_2.Bytes())
+
+var field1_21_3_4 bytes.Buffer
+writeProtobufString(&field1_21_3_4, 2, "")
+var field1_21_3_4_7 bytes.Buffer
+writeProtobufVarint(&field1_21_3_4_7, 2, 0)
+writeProtobufField(&field1_21_3_4, 7, field1_21_3_4_7.Bytes())
+writeProtobufField(&field1_21_3, 4, field1_21_3_4.Bytes())
+
+writeProtobufString(&field1_21_3, 8, "")
+writeProtobufField(&buf, 3, field1_21_3.Bytes())
+
+// field 1.21.5 - nested
+var field1_21_5 bytes.Buffer
+writeProtobufString(&field1_21_5, 1, "")
+writeProtobufField(&buf, 5, field1_21_5.Bytes())
+
+// field 1.21.6 - nested
+var field1_21_6 bytes.Buffer
+writeProtobufString(&field1_21_6, 1, "")
+var field1_21_6_2 bytes.Buffer
+writeProtobufString(&field1_21_6_2, 1, "")
+writeProtobufField(&field1_21_6, 2, field1_21_6_2.Bytes())
+writeProtobufField(&buf, 6, field1_21_6.Bytes())
+
+// field 1.21.7 - nested
+var field1_21_7 bytes.Buffer
+writeProtobufVarint(&field1_21_7, 1, 2)
+// repeated field with many values
+for _, v := range []int64{1, 7, 8, 9, 10, 13, 14, 15, 17, 19, 20, 22, 23, 45, 46, 47, 48, 49, 58, 6, 24, 50, 54, 55, 59, 62, 63, 64, 65, 56, 57, 60, 69} {
+writeProtobufVarint(&field1_21_7, 2, v)
+}
+writeProtobufVarint(&field1_21_7, 3, 1)
+writeProtobufField(&buf, 7, field1_21_7.Bytes())
+
+// field 1.21.8 - complex nested
+var field1_21_8 bytes.Buffer
+
+// field 1.21.8.3
+var field1_21_8_3 bytes.Buffer
+var field1_21_8_3_1 bytes.Buffer
+var field1_21_8_3_1_1 bytes.Buffer
+
+var field1_21_8_3_1_1_2 bytes.Buffer
+writeProtobufVarint(&field1_21_8_3_1_1_2, 1, 1)
+writeProtobufField(&field1_21_8_3_1_1, 2, field1_21_8_3_1_1_2.Bytes())
+
+var field1_21_8_3_1_1_4 bytes.Buffer
+writeProtobufString(&field1_21_8_3_1_1_4, 2, "")
+var field1_21_8_3_1_1_4_7 bytes.Buffer
+writeProtobufVarint(&field1_21_8_3_1_1_4_7, 2, 0)
+writeProtobufField(&field1_21_8_3_1_1_4, 7, field1_21_8_3_1_1_4_7.Bytes())
+writeProtobufField(&field1_21_8_3_1_1, 4, field1_21_8_3_1_1_4.Bytes())
+
+writeProtobufString(&field1_21_8_3_1_1, 8, "")
+writeProtobufField(&field1_21_8_3_1, 1, field1_21_8_3_1_1.Bytes())
+writeProtobufField(&field1_21_8_3, 1, field1_21_8_3_1.Bytes())
+writeProtobufString(&field1_21_8_3, 3, "")
+writeProtobufField(&field1_21_8, 3, field1_21_8_3.Bytes())
+
+// field 1.21.8.4
+var field1_21_8_4 bytes.Buffer
+writeProtobufString(&field1_21_8_4, 1, "")
+writeProtobufField(&field1_21_8, 4, field1_21_8_4.Bytes())
+
+// field 1.21.8.5
+var field1_21_8_5 bytes.Buffer
+var field1_21_8_5_1 bytes.Buffer
+var field1_21_8_5_1_2 bytes.Buffer
+writeProtobufVarint(&field1_21_8_5_1_2, 1, 1)
+writeProtobufField(&field1_21_8_5_1, 2, field1_21_8_5_1_2.Bytes())
+var field1_21_8_5_1_4 bytes.Buffer
+writeProtobufString(&field1_21_8_5_1_4, 2, "")
+var field1_21_8_5_1_4_7 bytes.Buffer
+writeProtobufVarint(&field1_21_8_5_1_4_7, 2, 0)
+writeProtobufField(&field1_21_8_5_1_4, 7, field1_21_8_5_1_4_7.Bytes())
+writeProtobufField(&field1_21_8_5_1, 4, field1_21_8_5_1_4.Bytes())
+writeProtobufString(&field1_21_8_5_1, 8, "")
+writeProtobufField(&field1_21_8_5, 1, field1_21_8_5_1.Bytes())
+writeProtobufField(&field1_21_8, 5, field1_21_8_5.Bytes())
+
+// field 1.21.8.6
+var field1_21_8_6 bytes.Buffer
+
+// field 1.21.8.6.1
+var field1_21_8_6_1 bytes.Buffer
+var field1_21_8_6_1_1 bytes.Buffer
+var field1_21_8_6_1_1_2 bytes.Buffer
+writeProtobufVarint(&field1_21_8_6_1_1_2, 1, 1)
+writeProtobufField(&field1_21_8_6_1_1, 2, field1_21_8_6_1_1_2.Bytes())
+var field1_21_8_6_1_1_4 bytes.Buffer
+writeProtobufString(&field1_21_8_6_1_1_4, 2, "")
+var field1_21_8_6_1_1_4_7 bytes.Buffer
+writeProtobufVarint(&field1_21_8_6_1_1_4_7, 2, 0)
+writeProtobufField(&field1_21_8_6_1_1_4, 7, field1_21_8_6_1_1_4_7.Bytes())
+writeProtobufField(&field1_21_8_6_1_1, 4, field1_21_8_6_1_1_4.Bytes())
+writeProtobufString(&field1_21_8_6_1_1, 8, "")
+writeProtobufField(&field1_21_8_6_1, 1, field1_21_8_6_1_1.Bytes())
+writeProtobufField(&field1_21_8_6, 1, field1_21_8_6_1.Bytes())
+
+// field 1.21.8.6.2
+var field1_21_8_6_2 bytes.Buffer
+var field1_21_8_6_2_1 bytes.Buffer
+var field1_21_8_6_2_1_2 bytes.Buffer
+writeProtobufVarint(&field1_21_8_6_2_1_2, 1, 1)
+writeProtobufField(&field1_21_8_6_2_1, 2, field1_21_8_6_2_1_2.Bytes())
+var field1_21_8_6_2_1_4 bytes.Buffer
+writeProtobufString(&field1_21_8_6_2_1_4, 2, "")
+var field1_21_8_6_2_1_4_7 bytes.Buffer
+writeProtobufVarint(&field1_21_8_6_2_1_4_7, 2, 0)
+writeProtobufField(&field1_21_8_6_2_1_4, 7, field1_21_8_6_2_1_4_7.Bytes())
+writeProtobufField(&field1_21_8_6_2_1, 4, field1_21_8_6_2_1_4.Bytes())
+writeProtobufString(&field1_21_8_6_2_1, 8, "")
+writeProtobufField(&field1_21_8_6_2, 1, field1_21_8_6_2_1.Bytes())
+writeProtobufField(&field1_21_8_6, 2, field1_21_8_6_2.Bytes())
+
+writeProtobufField(&field1_21_8, 6, field1_21_8_6.Bytes())
+writeProtobufField(&buf, 8, field1_21_8.Bytes())
+
+// field 1.21.9
+var field1_21_9 bytes.Buffer
+writeProtobufString(&field1_21_9, 1, "")
+writeProtobufField(&buf, 9, field1_21_9.Bytes())
+
+// field 1.21.10 - nested
+var field1_21_10 bytes.Buffer
+var field1_21_10_1 bytes.Buffer
+writeProtobufString(&field1_21_10_1, 1, "")
+writeProtobufField(&field1_21_10, 1, field1_21_10_1.Bytes())
+for _, f := range []int{3, 5, 7, 9, 10} {
+writeProtobufString(&field1_21_10, f, "")
+}
+var field1_21_10_6 bytes.Buffer
+writeProtobufString(&field1_21_10_6, 1, "")
+writeProtobufField(&field1_21_10, 6, field1_21_10_6.Bytes())
+writeProtobufField(&buf, 10, field1_21_10.Bytes())
+
+// fields 1.21.11, 1.21.12, 1.21.13, 1.21.14
+for _, f := range []int{11, 12, 13, 14} {
+writeProtobufString(&buf, f, "")
+}
+
+// field 1.21.19
+var field1_21_19 bytes.Buffer
+writeProtobufString(&field1_21_19, 1, "")
+writeProtobufString(&field1_21_19, 2, "")
+writeProtobufField(&buf, 19, field1_21_19.Bytes())
+
+return buf.Bytes()
+}
+
+// buildAlbumListField1_22 builds field 1.22
+func buildAlbumListField1_22() []byte {
+var buf bytes.Buffer
+writeProtobufVarint(&buf, 1, 2)
+return buf.Bytes()
+}
+
+// buildAlbumListField1_25 builds field 1.25
+func buildAlbumListField1_25() []byte {
+var buf bytes.Buffer
+
+var field1_25_1 bytes.Buffer
+var field1_25_1_1 bytes.Buffer
+var field1_25_1_1_1 bytes.Buffer
+writeProtobufString(&field1_25_1_1_1, 1, "")
+writeProtobufField(&field1_25_1_1, 1, field1_25_1_1_1.Bytes())
+writeProtobufField(&field1_25_1, 1, field1_25_1_1.Bytes())
+writeProtobufField(&buf, 1, field1_25_1.Bytes())
+
+writeProtobufString(&buf, 2, "")
+
+return buf.Bytes()
+}
+
+// buildAlbumListRequestField2 builds field 2 of the request
+func buildAlbumListRequestField2() []byte {
+var buf bytes.Buffer
+
+// field 2.1 - nested
+var field2_1 bytes.Buffer
+var field2_1_1 bytes.Buffer
+var field2_1_1_1 bytes.Buffer
+writeProtobufString(&field2_1_1_1, 1, "")
+writeProtobufField(&field2_1_1, 1, field2_1_1_1.Bytes())
+writeProtobufString(&field2_1_1, 2, "")
+writeProtobufField(&field2_1, 1, field2_1_1.Bytes())
+writeProtobufField(&buf, 1, field2_1.Bytes())
+
+// field 2.2 - empty
+writeProtobufString(&buf, 2, "")
+
+return buf.Bytes()
+}
+
+// parseAlbumListResponse parses the protobuf response and extracts albums
+func parseAlbumListResponse(data []byte) (*AlbumListResult, error) {
+result := &AlbumListResult{
+Albums: []AlbumItem{},
+}
+
+// Parse the response using low-level protobuf parsing
+// The response structure should be similar to media list responses
+// We'll extract albums and pagination token
+albums, paginationToken := extractAlbumsFromResponse(data)
+
+result.Albums = albums
+result.NextPageToken = paginationToken
+
+return result, nil
+}
+
+// extractAlbumsFromResponse parses the protobuf response bytes and extracts album items
+func extractAlbumsFromResponse(data []byte) ([]AlbumItem, string) {
+var albums []AlbumItem
+var paginationToken string
+
+// Parse the top-level message
+offset := 0
+for offset < len(data) {
+fieldNum, wireType, newOffset := readTag(data, offset)
+if newOffset < 0 {
+break
+}
+offset = newOffset
+
+switch wireType {
+case 0: // Varint
+_, offset = readVarint(data, offset)
+case 2: // Length-delimited
+length, newOffset := readVarint(data, offset)
+if newOffset < 0 || newOffset+int(length) > len(data) {
+return albums, paginationToken
+}
+fieldData := data[newOffset : newOffset+int(length)]
+offset = newOffset + int(length)
+
+// Field 1 contains the main response data
+if fieldNum == 1 {
+extractedAlbums, token := parseAlbumResponseField1(fieldData)
+albums = append(albums, extractedAlbums...)
+if token != "" {
+paginationToken = token
+}
+}
+case 5: // 32-bit
+offset += 4
+case 1: // 64-bit
+offset += 8
+default:
+return albums, paginationToken
+}
+}
+
+return albums, paginationToken
+}
+
+// parseAlbumResponseField1 parses the field1 of the response which contains album items
+func parseAlbumResponseField1(data []byte) ([]AlbumItem, string) {
+var albums []AlbumItem
+var paginationToken string
+
+offset := 0
+for offset < len(data) {
+fieldNum, wireType, newOffset := readTag(data, offset)
+if newOffset < 0 {
+break
+}
+offset = newOffset
+
+switch wireType {
+case 0: // Varint
+_, offset = readVarint(data, offset)
+case 2: // Length-delimited
+length, newOffset := readVarint(data, offset)
+if newOffset < 0 || newOffset+int(length) > len(data) {
+return albums, paginationToken
+}
+fieldData := data[newOffset : newOffset+int(length)]
+offset = newOffset + int(length)
+
+// Field 4 is the pagination token (for next request's field 1.4)
+if fieldNum == 4 {
+paginationToken = string(fieldData)
+}
+
+// Try to parse as album - albums may be in different fields
+// This is a simplified parser - adjust based on actual response structure
+album := tryParseAlbumItem(fieldData)
+if album != nil && album.AlbumKey != "" {
+albums = append(albums, *album)
+}
+case 5: // 32-bit
+offset += 4
+case 1: // 64-bit
+offset += 8
+default:
+return albums, paginationToken
+}
+}
+
+return albums, paginationToken
+}
+
+// tryParseAlbumItem attempts to parse a protobuf message as an album item
+func tryParseAlbumItem(data []byte) *AlbumItem {
+album := &AlbumItem{}
+hasData := false
+
+offset := 0
+for offset < len(data) {
+fieldNum, wireType, newOffset := readTag(data, offset)
+if newOffset < 0 {
+break
+}
+offset = newOffset
+
+switch wireType {
+case 0: // Varint
+value, newOffset := readVarint(data, offset)
+if newOffset >= 0 {
+// Field 3 or similar might be media count
+if fieldNum == 3 || fieldNum == 5 {
+album.MediaCount = int(value)
+hasData = true
+}
+}
+offset = newOffset
+case 2: // Length-delimited (string or nested message)
+length, newOffset := readVarint(data, offset)
+if newOffset < 0 || newOffset+int(length) > len(data) {
+break
+}
+fieldData := data[newOffset : newOffset+int(length)]
+offset = newOffset + int(length)
+
+// Field 1 might be album key
+if fieldNum == 1 && isPrintableString(fieldData) {
+album.AlbumKey = string(fieldData)
+hasData = true
+}
+// Field 2 might be album title
+if fieldNum == 2 && isPrintableString(fieldData) {
+album.Title = string(fieldData)
+hasData = true
+}
+case 5: // 32-bit
+offset += 4
+case 1: // 64-bit
+offset += 8
+}
+}
+
+if hasData {
+return album
+}
+return nil
 }
