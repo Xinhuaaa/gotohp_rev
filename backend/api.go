@@ -837,7 +837,7 @@ func selectBetterItem(current, candidate *MediaItem) *MediaItem {
 // for the target media key. Returns nil if no matching item is found.
 func parseMediaInfoResponse(data []byte, targetMediaKey string) *MediaItem {
 	// Parse the response using the same logic as media list parsing
-	items, _, _ := extractMediaItemsFromResponse(data, 0)
+	items, _ := extractMediaItemsFromResponse(data, 0)
 
 	// Find the matching item (prefer ones with filename)
 	var matchedItem *MediaItem
@@ -1182,8 +1182,7 @@ type MediaItem struct {
 // MediaListResult contains the result of a media list request
 type MediaListResult struct {
 	Items         []MediaItem `json:"items"`
-	NextPageToken string      `json:"nextPageToken,omitempty"`
-	StateToken    string      `json:"stateToken,omitempty"`
+	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.1
 }
 
 // minMediaKeyLength is the minimum expected length for a valid media key string
@@ -1192,11 +1191,11 @@ const minMediaKeyLength = 10
 
 // GetMediaList retrieves a list of media items from the library
 // This uses a simplified request to fetch media items with pagination support
-// stateToken should be passed from previous responses for proper pagination
-func (a *Api) GetMediaList(pageToken string, stateToken string, limit int) (*MediaListResult, error) {
+// pageToken should be passed from previous responses (field 1.1) for proper pagination
+func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
 	// Build the request using raw protobuf wire format
 	// The request structure is complex, so we use a helper to build it
-	requestData := buildMediaListRequest(pageToken, stateToken, limit)
+	requestData := buildMediaListRequest(pageToken, limit)
 
 	// Get the bearer token
 	bearerToken, err := a.BearerToken()
@@ -1269,13 +1268,12 @@ func (a *Api) GetMediaList(pageToken string, stateToken string, limit int) (*Med
 }
 
 // buildMediaListRequest creates the protobuf request for fetching media list
-// When stateToken is empty, it works like get_library_page_init (first page)
-// When stateToken is provided, it works like get_library_page (subsequent pages)
-func buildMediaListRequest(pageToken string, stateToken string, limit int) []byte {
+// pageToken comes from the previous response's field 1.1 and goes into request field 1.6
+func buildMediaListRequest(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// Build field 1 (request data)
-	field1 := buildMediaListRequestField1(pageToken, stateToken, limit)
+	field1 := buildMediaListRequestField1(pageToken, limit)
 	writeProtobufField(&buf, 1, field1)
 
 	// Build field 2 (additional options)
@@ -1285,7 +1283,7 @@ func buildMediaListRequest(pageToken string, stateToken string, limit int) []byt
 	return buf.Bytes()
 }
 
-func buildMediaListRequestField1(pageToken string, stateToken string, limit int) []byte {
+func buildMediaListRequestField1(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// These field numbers correspond to the Google Photos protobuf schema for media list requests
@@ -1305,15 +1303,10 @@ func buildMediaListRequestField1(pageToken string, stateToken string, limit int)
 	field1_3 := buildEmptyNestedMessage(albumOptions)
 	writeProtobufField(&buf, 3, field1_3)
 
-	// field1.4 - page token (string)
+	// field1.6 - pagination token (string) - this is the only field that changes between requests
+	// The value comes from the previous response's field 1.1
 	if pageToken != "" {
-		writeProtobufString(&buf, 4, pageToken)
-	}
-
-	// field1.6 - state token (string) - required for proper pagination
-	// This field is present in get_library_page but not in get_library_page_init
-	if stateToken != "" {
-		writeProtobufString(&buf, 6, stateToken)
+		writeProtobufString(&buf, 6, pageToken)
 	}
 
 	// field1.7 - type (varint = 2)
@@ -1393,11 +1386,10 @@ func parseMediaListResponse(data []byte, limit int) (*MediaListResult, error) {
 
 	// Parse the response using low-level protobuf parsing
 	// The response has a complex structure, we need to navigate to the media items
-	items, nextPageToken, stateToken := extractMediaItemsFromResponse(data, limit)
+	items, paginationToken := extractMediaItemsFromResponse(data, limit)
 
 	result.Items = items
-	result.NextPageToken = nextPageToken
-	result.StateToken = stateToken
+	result.NextPageToken = paginationToken
 
 	return result, nil
 }
@@ -1408,9 +1400,9 @@ func shouldAddItem(currentCount, limit int) bool {
 }
 
 // extractMediaItemsFromResponse parses the protobuf response bytes and extracts media items
-func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string, string) {
+func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string) {
 	var items []MediaItem
-	var nextPageToken, stateToken string
+	var paginationToken string
 
 	// Parse the top-level message
 	offset := 0
@@ -1427,7 +1419,7 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string,
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
-				return items, nextPageToken, stateToken
+				return items, paginationToken
 			}
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
@@ -1438,13 +1430,10 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string,
 				if limit > 0 {
 					remainingLimit = limit - len(items)
 				}
-				extractedItems, token, state := parseResponseField1(fieldData, remainingLimit)
+				extractedItems, token := parseResponseField1(fieldData, remainingLimit)
 				items = append(items, extractedItems...)
 				if token != "" {
-					nextPageToken = token
-				}
-				if state != "" {
-					stateToken = state
+					paginationToken = token
 				}
 			}
 		case 5: // 32-bit
@@ -1452,17 +1441,17 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string,
 		case 1: // 64-bit
 			offset += 8
 		default:
-			return items, nextPageToken, stateToken
+			return items, paginationToken
 		}
 	}
 
-	return items, nextPageToken, stateToken
+	return items, paginationToken
 }
 
 // parseResponseField1 parses the field1 of the response which contains media items
-func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
+func parseResponseField1(data []byte, limit int) ([]MediaItem, string) {
 	var items []MediaItem
-	var nextPageToken, stateToken string
+	var paginationToken string
 
 	offset := 0
 	for offset < len(data) {
@@ -1478,7 +1467,7 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
-				return items, nextPageToken, stateToken
+				return items, paginationToken
 			}
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
@@ -1490,24 +1479,20 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 					items = append(items, *item)
 				}
 			}
-			// Field 6 is the next page token
-			if fieldNum == 6 {
-				nextPageToken = string(fieldData)
-			}
-			// Field 5 is the state token
-			if fieldNum == 5 {
-				stateToken = string(fieldData)
+			// Field 1 is the pagination token (for next request's field 1.6)
+			if fieldNum == 1 {
+				paginationToken = string(fieldData)
 			}
 		case 5: // 32-bit
 			offset += 4
 		case 1: // 64-bit
 			offset += 8
 		default:
-			return items, nextPageToken, stateToken
+			return items, paginationToken
 		}
 	}
 
-	return items, nextPageToken, stateToken
+	return items, paginationToken
 }
 
 // tryParseMediaItem attempts to parse a protobuf message as a media item

@@ -8,7 +8,6 @@ import { toast } from "vue-sonner"
 const mediaItems = ref<MediaItem[]>([])
 const loading = ref(false)
 const pageToken = ref('')
-const stateToken = ref('') // Track state token for proper pagination
 const hasMore = ref(true)
 const reachedEnd = ref(false)
 const thumbnailSize = ref('medium')
@@ -53,17 +52,11 @@ async function loadMediaList() {
   
   loading.value = true
   try {
-    debugLog('Loading media list with pageToken:', pageToken.value, 'stateToken:', stateToken.value)
-    const result = await MediaBrowser.GetMediaList(pageToken.value, stateToken.value, 50)
+    debugLog('Loading media list with pageToken:', pageToken.value)
+    const result = await MediaBrowser.GetMediaList(pageToken.value, 50)
     debugLog('Received result:', result)
     
     if (result && result.items) {
-      // Update state token if provided in response
-      if (result.stateToken) {
-        debugLog('Updated stateToken:', result.stateToken)
-        stateToken.value = result.stateToken
-      }
-      
       // Filter out duplicate items based on mediaKey
       const newItems = result.items.filter(item => {
         if (seenMediaKeys.value.has(item.mediaKey)) {
