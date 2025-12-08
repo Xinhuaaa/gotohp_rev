@@ -21,11 +21,10 @@ export interface MediaItem {
 export interface MediaListResult {
     items: MediaItem[];
     nextPageToken?: string;
-    stateToken?: string;
 }
 
-export function GetMediaList(pageToken: string, stateToken: string, limit: number): $CancellablePromise<MediaListResult> {
-    return $Call.ByID(hashCode("MediaBrowser.GetMediaList"), pageToken, stateToken, limit).then(($result: any) => {
+export function GetMediaList(pageToken: string, limit: number): $CancellablePromise<MediaListResult> {
+    return $Call.ByID(hashCode("MediaBrowser.GetMediaList"), pageToken, limit).then(($result: any) => {
         return $result as MediaListResult;
     });
 }
