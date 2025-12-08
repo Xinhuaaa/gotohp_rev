@@ -1763,11 +1763,11 @@ func (a *Api) GetAlbumList(pageToken string) (*AlbumListResult, error) {
 // buildAlbumListRequest creates the protobuf request for fetching album list
 // According to the provided format, only field 1.4 (pageToken) changes between requests
 func buildAlbumListRequest(pageToken string) []byte {
-var buf bytes.Buffer
+	var buf bytes.Buffer
 
-// Build field 1 (main request data)
-field1 := buildAlbumListRequestField1(pageToken)
-writeProtobufField(&buf, 1, field1)
+	// Build field 1 (main request data)
+	field1 := buildAlbumListRequestField1(pageToken)
+	writeProtobufField(&buf, 1, field1)
 
 // Build field 2 (additional options)
 field2 := buildAlbumListRequestField2()

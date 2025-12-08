@@ -343,7 +343,7 @@ func runCLI() {
 					pageToken = os.Args[i+1]
 					i++
 				}
-			case "--json":
+			case "--json", "-j":
 				jsonOutput = true
 			default:
 				fmt.Fprintf(os.Stderr, "Warning: unknown flag '%s'\n", os.Args[i])
