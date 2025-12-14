@@ -445,7 +445,9 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 	// Collect all items across pages
 	var allItems []backend.MediaItem
 	currentPageToken := pageToken
-	lastNextPageToken := "" // Track the next page token from the last API response
+	currentStateToken := ""     // Track state token across requests
+	lastNextPageToken := ""     // Track the next page token from the last API response
+	lastStateToken := ""        // Track the state token from the last API response
 	pagesRequested := 0
 	emptyPageRetries := 0 // Count consecutive empty pages
 
@@ -459,13 +461,14 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 			}
 		}
 
-		result, err := api.GetMediaList(currentPageToken, limit)
+		result, err := api.GetMediaList(currentPageToken, currentStateToken, limit)
 		if err != nil {
 			return fmt.Errorf("failed to get media list: %w", err)
 		}
 
-		// Always track the latest token from API response
+		// Always track the latest tokens from API response
 		lastNextPageToken = result.NextPageToken
+		lastStateToken = result.StateToken
 
 		// If page has 0 items but has a next page token, auto-skip to next page
 		if len(result.Items) == 0 && result.NextPageToken != "" {
@@ -473,6 +476,10 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 				fmt.Println("Page has 0 items, automatically fetching next page...")
 			}
 			currentPageToken = result.NextPageToken
+			// Update state token as well
+			if result.StateToken != "" {
+				currentStateToken = result.StateToken
+			}
 			emptyPageRetries++
 			if emptyPageRetries >= maxEmptyPages {
 				if !jsonOutput {
@@ -497,14 +504,18 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 			break
 		}
 
-		// Update page token for next iteration
+		// Update tokens for next iteration
 		currentPageToken = result.NextPageToken
+		if result.StateToken != "" {
+			currentStateToken = result.StateToken
+		}
 	}
 
 	// Create final result
 	finalResult := &backend.MediaListResult{
 		Items:         allItems,
 		NextPageToken: lastNextPageToken,
+		StateToken:    lastStateToken,
 	}
 
 	if jsonOutput {

@@ -16,7 +16,7 @@ const (
 type MediaBrowser struct{}
 
 // GetMediaList retrieves a paginated list of media items
-func (m *MediaBrowser) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
+func (m *MediaBrowser) GetMediaList(pageToken string, stateToken string, limit int) (*MediaListResult, error) {
 	// Create a new API client for each request. While this has some overhead,
 	// it ensures we always have fresh authentication and simplifies error handling.
 	// The API client internally caches auth tokens to minimize redundant auth requests.
@@ -25,7 +25,7 @@ func (m *MediaBrowser) GetMediaList(pageToken string, limit int) (*MediaListResu
 		return nil, fmt.Errorf("failed to create API client: %w", err)
 	}
 
-	result, err := api.GetMediaList(pageToken, limit)
+	result, err := api.GetMediaList(pageToken, stateToken, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get media list: %w", err)
 	}
