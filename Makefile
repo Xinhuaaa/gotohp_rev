@@ -31,7 +31,8 @@ frontend-prod:
 clean:
 	@echo "Cleaning build artifacts..."
 	rm -f gotohp gotohp-cli
-	rm -rf frontend/dist
+	rm -rf frontend/dist/*
+	@mkdir -p frontend/dist && touch frontend/dist/.gitkeep
 
 # Run tests
 test:
