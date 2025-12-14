@@ -2721,8 +2721,8 @@ func parseAlbumResponseField1(data []byte) ([]AlbumItem, string) {
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
 
-			// Field 4 is the pagination token (for next request's field 1.4)
-			if fieldNum == 4 {
+			// Field 1 is the pagination token (for next request's field 1.4)
+			if fieldNum == 1 {
 				paginationToken = string(fieldData)
 			}
 
