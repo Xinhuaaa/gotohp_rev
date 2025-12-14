@@ -127,6 +127,9 @@ func NewApi() (*Api, error) {
 	return api, nil
 }
 
+// BearerToken retrieves a valid bearer token for API authentication.
+// It uses a global cache to avoid redundant auth requests. The token is
+// automatically refreshed when it expires. This method is thread-safe.
 func (a *Api) BearerToken() (string, error) {
 	// Check global cache first
 	token, expiry, found := globalAuthCache.get(a.accountEmail)
