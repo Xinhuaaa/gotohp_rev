@@ -98,7 +98,7 @@ func NewApi() (*Api, error) {
 	}
 
 	if len(credentials) == 0 {
-		return nil, fmt.Errorf("no credentials with matching selcted email found")
+		return nil, fmt.Errorf("no credentials with matching selected email found")
 	}
 
 	client, err := NewHTTPClientWithProxy(AppConfig.Proxy)
