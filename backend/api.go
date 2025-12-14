@@ -14,11 +14,53 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"google.golang.org/protobuf/proto"
 )
+
+// globalAuthCache stores auth tokens globally across all API instances
+// This prevents redundant auth requests when multiple operations are performed
+var globalAuthCache = &authCache{
+	cache: make(map[string]*authCacheEntry),
+}
+
+// authCacheEntry stores the cached auth token and expiry for an account
+type authCacheEntry struct {
+	token  string
+	expiry int64
+}
+
+// authCache provides thread-safe storage for auth tokens
+type authCache struct {
+	mu    sync.RWMutex
+	cache map[string]*authCacheEntry // key is the account email
+}
+
+// get retrieves the cached auth token for an account
+func (c *authCache) get(email string) (token string, expiry int64, found bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	entry, exists := c.cache[email]
+	if !exists {
+		return "", 0, false
+	}
+	return entry.token, entry.expiry, true
+}
+
+// set stores the auth token and expiry for an account
+func (c *authCache) set(email string, token string, expiry int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	c.cache[email] = &authCacheEntry{
+		token:  token,
+		expiry: expiry,
+	}
+}
 
 type Api struct {
 	androidAPIVersion int64
@@ -28,8 +70,8 @@ type Api struct {
 	userAgent         string
 	language          string
 	authData          string
+	accountEmail      string
 	client            *http.Client
-	authResponseCache map[string]string
 }
 
 type AuthResponse struct {
@@ -71,11 +113,8 @@ func NewApi() (*Api, error) {
 		clientVersionCode: 49029607,
 		language:          language,
 		authData:          strings.TrimSpace(credentials),
+		accountEmail:      selectedEmail,
 		client:            client,
-		authResponseCache: map[string]string{
-			"Expiry": "0",
-			"Auth":   "",
-		},
 	}
 
 	api.userAgent = fmt.Sprintf(
@@ -89,25 +128,37 @@ func NewApi() (*Api, error) {
 }
 
 func (a *Api) BearerToken() (string, error) {
-	expiryStr := a.authResponseCache["Expiry"]
-	expiry, err := strconv.ParseInt(expiryStr, 10, 64)
+	// Check global cache first
+	token, expiry, found := globalAuthCache.get(a.accountEmail)
+	
+	// If token exists and not expired, use it
+	if found && expiry > time.Now().Unix() {
+		return token, nil
+	}
+	
+	// Token is missing or expired, fetch a new one
+	resp, err := a.getAuthToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to get auth token: %w", err)
+	}
+	
+	// Parse expiry from response
+	expiryStr := resp["Expiry"]
+	expiry, err = strconv.ParseInt(expiryStr, 10, 64)
 	if err != nil {
 		return "", fmt.Errorf("invalid expiry time: %w", err)
 	}
-
-	if expiry <= time.Now().Unix() {
-		resp, err := a.getAuthToken()
-		if err != nil {
-			return "", fmt.Errorf("failed to get auth token: %w", err)
-		}
-		a.authResponseCache = resp
+	
+	// Get token from response
+	token = resp["Auth"]
+	if token == "" {
+		return "", errors.New("auth response does not contain bearer token")
 	}
-
-	if token, ok := a.authResponseCache["Auth"]; ok && token != "" {
-		return token, nil
-	}
-
-	return "", errors.New("auth response does not contain bearer token")
+	
+	// Store in global cache
+	globalAuthCache.set(a.accountEmail, token, expiry)
+	
+	return token, nil
 }
 
 func (a *Api) getAuthToken() (map[string]string, error) {
