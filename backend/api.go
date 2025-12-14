@@ -1542,7 +1542,6 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string,
 
 	return items, paginationToken, stateToken
 }
-}
 
 // parseResponseField1 parses the field1 of the response which contains media items
 func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {

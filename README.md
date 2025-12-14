@@ -162,5 +162,58 @@ You only need to do this once.
 
 ## Build
 
-Follow official wails3 guide
+### Prerequisites
+
+- Go 1.25+
+- Node.js (LTS version recommended)
+- Platform-specific requirements (see below)
+
+For detailed Wails3 setup, follow the official guide:
 [https://v3alpha.wails.io/getting-started/installation/](https://v3alpha.wails.io/getting-started/installation/)
+
+### Platform-Specific Requirements
+
+**Linux:**
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential libwebkit2gtk-4.1-dev gcc libgtk-3-dev pkg-config
+```
+
+**macOS:**
+- Xcode Command Line Tools
+
+**Windows:**
+- No additional requirements
+
+### Building
+
+#### Using Make (Recommended)
+
+```bash
+# Build the complete application (includes GUI)
+make build
+
+# Build CLI-only version
+make build-cli
+
+# Build frontend only
+make frontend
+
+# Clean build artifacts
+make clean
+```
+
+#### Using wails3 (Alternative)
+
+```bash
+# Install wails3
+go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+
+# Development mode with hot reload
+wails3 dev
+
+# Production build
+wails3 build
+```
+
+**Note:** If you encounter the error `pattern all:frontend/dist: no matching files found`, run `make frontend` first to build the frontend assets, then try building again.
