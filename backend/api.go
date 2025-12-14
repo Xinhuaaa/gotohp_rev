@@ -43,7 +43,7 @@ type authCache struct {
 func (c *authCache) get(email string) (token string, expiry int64, found bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	entry, exists := c.cache[email]
 	if !exists {
 		return "", 0, false
@@ -55,7 +55,7 @@ func (c *authCache) get(email string) (token string, expiry int64, found bool) {
 func (c *authCache) set(email string, token string, expiry int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	c.cache[email] = &authCacheEntry{
 		token:  token,
 		expiry: expiry,
@@ -130,34 +130,34 @@ func NewApi() (*Api, error) {
 func (a *Api) BearerToken() (string, error) {
 	// Check global cache first
 	token, expiry, found := globalAuthCache.get(a.accountEmail)
-	
+
 	// If token exists and not expired, use it
 	if found && expiry > time.Now().Unix() {
 		return token, nil
 	}
-	
+
 	// Token is missing or expired, fetch a new one
 	resp, err := a.getAuthToken()
 	if err != nil {
 		return "", fmt.Errorf("failed to get auth token: %w", err)
 	}
-	
+
 	// Parse expiry from response
 	expiryStr := resp["Expiry"]
 	expiry, err = strconv.ParseInt(expiryStr, 10, 64)
 	if err != nil {
 		return "", fmt.Errorf("invalid expiry time: %w", err)
 	}
-	
+
 	// Get token from response
 	token = resp["Auth"]
 	if token == "" {
 		return "", errors.New("auth response does not contain bearer token")
 	}
-	
+
 	// Store in global cache
 	globalAuthCache.set(a.accountEmail, token, expiry)
-	
+
 	return token, nil
 }
 
