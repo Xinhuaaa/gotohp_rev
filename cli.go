@@ -459,7 +459,8 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 			}
 		}
 
-		result, err := api.GetMediaList(currentPageToken, limit)
+		// For CLI list, we use passive mode (2) and empty sync token
+		result, err := api.GetMediaList(currentPageToken, "", 2, limit)
 		if err != nil {
 			return fmt.Errorf("failed to get media list: %w", err)
 		}

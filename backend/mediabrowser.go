@@ -41,13 +41,13 @@ func (m *MediaBrowser) getAPI() (*Api, error) {
 }
 
 // GetMediaList retrieves a paginated list of media items
-func (m *MediaBrowser) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
+func (m *MediaBrowser) GetMediaList(pageToken string, syncToken string, triggerMode int, limit int) (*MediaListResult, error) {
 	api, err := m.getAPI()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client: %w", err)
 	}
 
-	result, err := api.GetMediaList(pageToken, limit)
+	result, err := api.GetMediaList(pageToken, syncToken, triggerMode, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get media list: %w", err)
 	}

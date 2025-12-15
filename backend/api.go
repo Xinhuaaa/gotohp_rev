@@ -854,7 +854,7 @@ func selectBetterItem(current, candidate *MediaItem) *MediaItem {
 // for the target media key. Returns nil if no matching item is found.
 func parseMediaInfoResponse(data []byte, targetMediaKey string) *MediaItem {
 	// Parse the response using the same logic as media list parsing
-	items, _ := extractMediaItemsFromResponse(data, 0)
+	items, _, _ := extractMediaItemsFromResponse(data, 0)
 
 	// Find the matching item (prefer ones with filename)
 	var matchedItem *MediaItem
@@ -986,7 +986,7 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 				}
 			case 2:
 				// Field 2 contains nested metadata with filename at sub-field 4
-				filename, countsTowardsQuota := extractField2Metadata(fieldData)
+				filename, countsTowardsQuota, _ := extractField2Metadata(fieldData)
 				if filename != "" {
 					item.Filename = filename
 				} else if isPrintableString(fieldData) {
@@ -1023,12 +1023,14 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 	return item
 }
 
-// extractField2Metadata extracts the filename and quota usage hint from field 2 of a media item
+// extractField2Metadata extracts the filename, quota usage hint, and status from field 2 of a media item
 // Based on the structure: field2 -> field4 = filename, field2 -> field22 = quota consumption marker
-func extractField2Metadata(data []byte) (string, bool) {
+// field2 -> field16 -> field1 = status (1=Add, 2=Delete)
+func extractField2Metadata(data []byte) (string, bool, int) {
 	offset := 0
 	filename := ""
 	countsTowardsQuota := false
+	status := 0
 	for offset < len(data) {
 		fieldNum, wireType, newOffset := readTag(data, offset)
 		if newOffset < 0 {
@@ -1042,15 +1044,39 @@ func extractField2Metadata(data []byte) (string, bool) {
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
-				return filename, countsTowardsQuota
+				return filename, countsTowardsQuota, status
 			}
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
 
-			// Field 4 is the filename, field 22 indicates whether the item uses quota
+			// Field 2 nested message (recursion)
+			if fieldNum == 2 {
+				fName, cQuota, s := extractField2Metadata(fieldData)
+				if fName != "" && filename == "" {
+					filename = fName
+				}
+				if cQuota {
+					countsTowardsQuota = true
+				}
+				if s > 0 {
+					status = s
+				}
+			}
+
+			// Field 4 is the filename
 			if fieldNum == 4 && isPrintableString(fieldData) {
 				filename = string(fieldData)
 			}
+
+			// Field 16 contains status info
+			if fieldNum == 16 {
+				// Parse field 16 (nested message) to find field 1 (status)
+				s := parseStatusField(fieldData)
+				if s > 0 {
+					status = s
+				}
+			}
+
 			if fieldNum == 22 {
 				countsTowardsQuota = true
 			}
@@ -1059,10 +1085,45 @@ func extractField2Metadata(data []byte) (string, bool) {
 		case 1: // 64-bit
 			offset += 8
 		default:
-			return filename, countsTowardsQuota
+			return filename, countsTowardsQuota, status
 		}
 	}
-	return filename, countsTowardsQuota
+	return filename, countsTowardsQuota, status
+}
+
+// parseStatusField extracts the status from field 16
+func parseStatusField(data []byte) int {
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			break
+		}
+		offset = newOffset
+
+		if wireType == 0 && fieldNum == 1 {
+			val, _ := readVarint(data, offset)
+			return int(val)
+		}
+
+		switch wireType {
+		case 0:
+			_, offset = readVarint(data, offset)
+		case 2:
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				return 0
+			}
+			offset = newOffset + int(length)
+		case 5:
+			offset += 4
+		case 1:
+			offset += 8
+		default:
+			return 0
+		}
+	}
+	return 0
 }
 
 // GetThumbnail retrieves a thumbnail for a media item
@@ -1214,12 +1275,14 @@ type MediaItem struct {
 	// CountsTowardsQuota indicates whether the item consumes storage quota.
 	// Field 22 in the response marks items that do consume quota; items without it are treated as quota-exempt.
 	CountsTowardsQuota bool `json:"countsTowardsQuota"`
+	Status             int  `json:"status,omitempty"` // 1=Add, 2=Remove/Update
 }
 
 // MediaListResult contains the result of a media list request
 type MediaListResult struct {
 	Items         []MediaItem `json:"items"`
 	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.1
+	SyncToken     string      `json:"syncToken,omitempty"`     // Sync token from response field 1.6
 }
 
 // AlbumItem represents a single album in Google Photos
@@ -1242,10 +1305,12 @@ const minMediaKeyLength = 10
 // GetMediaList retrieves a list of media items from the library
 // This uses a simplified request to fetch media items with pagination support
 // pageToken should be passed from previous responses (field 1.1) for proper pagination
-func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
+// syncToken should be passed for incremental updates (field 1.6)
+// triggerMode controls the update mode (1=Active/Fetch Changes, 2=Passive/Scan)
+func (a *Api) GetMediaList(pageToken string, syncToken string, triggerMode int, limit int) (*MediaListResult, error) {
 	// Build the request using raw protobuf wire format
 	// The request structure is complex, so we use a helper to build it
-	requestData := buildMediaListRequest(pageToken, limit)
+	requestData := buildMediaListRequest(pageToken, syncToken, triggerMode, limit)
 
 	// Get the bearer token
 	bearerToken, err := a.BearerToken()
@@ -1319,11 +1384,11 @@ func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error
 
 // buildMediaListRequest creates the protobuf request for fetching media list
 // pageToken comes from the previous response's field 1.1 and goes into request field 1.4
-func buildMediaListRequest(pageToken string, limit int) []byte {
+func buildMediaListRequest(pageToken string, syncToken string, triggerMode int, limit int) []byte {
 	var buf bytes.Buffer
 
 	// Build field 1 (request data)
-	field1 := buildMediaListRequestField1(pageToken, limit)
+	field1 := buildMediaListRequestField1(pageToken, syncToken, triggerMode, limit)
 	writeProtobufField(&buf, 1, field1)
 
 	// Build field 2 (additional options)
@@ -1333,7 +1398,7 @@ func buildMediaListRequest(pageToken string, limit int) []byte {
 	return buf.Bytes()
 }
 
-func buildMediaListRequestField1(pageToken string, limit int) []byte {
+func buildMediaListRequestField1(pageToken string, syncToken string, triggerMode int, limit int) []byte {
 	var buf bytes.Buffer
 
 	// These field numbers correspond to the Google Photos protobuf schema for media list requests
@@ -1359,6 +1424,12 @@ func buildMediaListRequestField1(pageToken string, limit int) []byte {
 		writeProtobufString(&buf, 4, pageToken)
 	}
 
+	// field1.6 - sync token (string) - for incremental updates
+	// The value comes from the previous response's field 1.6
+	if syncToken != "" {
+		writeProtobufString(&buf, 6, syncToken)
+	}
+
 	// field1.7 - type (varint = 2)
 	writeProtobufVarint(&buf, 7, 2)
 
@@ -1366,9 +1437,14 @@ func buildMediaListRequestField1(pageToken string, limit int) []byte {
 	writeProtobufVarint(&buf, 11, 1)
 	writeProtobufVarint(&buf, 11, 2)
 
-	// field1.22 - some config
+	// field1.22 - some config including Trigger Mode
+	// 1.22.1: Trigger Mode (1=Active, 2=Passive)
 	var field22 bytes.Buffer
-	writeProtobufVarint(&field22, 1, 2)
+	tMode := int64(2)
+	if triggerMode == 1 {
+		tMode = 1
+	}
+	writeProtobufVarint(&field22, 1, tMode)
 	writeProtobufField(&buf, 22, field22.Bytes())
 
 	return buf.Bytes()
@@ -1436,10 +1512,11 @@ func parseMediaListResponse(data []byte, limit int) (*MediaListResult, error) {
 
 	// Parse the response using low-level protobuf parsing
 	// The response has a complex structure, we need to navigate to the media items
-	items, paginationToken := extractMediaItemsFromResponse(data, limit)
+	items, paginationToken, syncToken := extractMediaItemsFromResponse(data, limit)
 
 	result.Items = items
 	result.NextPageToken = paginationToken
+	result.SyncToken = syncToken
 
 	return result, nil
 }
@@ -1450,9 +1527,10 @@ func shouldAddItem(currentCount, limit int) bool {
 }
 
 // extractMediaItemsFromResponse parses the protobuf response bytes and extracts media items
-func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string) {
+func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string, string) {
 	var items []MediaItem
 	var paginationToken string
+	var syncToken string
 
 	// Parse the top-level message
 	offset := 0
@@ -1469,7 +1547,7 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string)
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
-				return items, paginationToken
+				return items, paginationToken, syncToken
 			}
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
@@ -1480,10 +1558,13 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string)
 				if limit > 0 {
 					remainingLimit = limit - len(items)
 				}
-				extractedItems, token := parseResponseField1(fieldData, remainingLimit)
+				extractedItems, token, sToken := parseResponseField1(fieldData, remainingLimit)
 				items = append(items, extractedItems...)
 				if token != "" {
 					paginationToken = token
+				}
+				if sToken != "" {
+					syncToken = sToken
 				}
 			}
 		case 5: // 32-bit
@@ -1491,17 +1572,18 @@ func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string)
 		case 1: // 64-bit
 			offset += 8
 		default:
-			return items, paginationToken
+			return items, paginationToken, syncToken
 		}
 	}
 
-	return items, paginationToken
+	return items, paginationToken, syncToken
 }
 
 // parseResponseField1 parses the field1 of the response which contains media items
-func parseResponseField1(data []byte, limit int) ([]MediaItem, string) {
+func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 	var items []MediaItem
 	var paginationToken string
+	var syncToken string
 
 	offset := 0
 	for offset < len(data) {
@@ -1517,7 +1599,7 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string) {
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
-				return items, paginationToken
+				return items, paginationToken, syncToken
 			}
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
@@ -1529,20 +1611,24 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string) {
 					items = append(items, *item)
 				}
 			}
-			// Field 1 is the pagination token (for next request's field 1.6)
+			// Field 1 is the pagination token (next_page_token)
 			if fieldNum == 1 {
 				paginationToken = string(fieldData)
+			}
+			// Field 6 is the sync token (sync_token) - new state anchor
+			if fieldNum == 6 {
+				syncToken = string(fieldData)
 			}
 		case 5: // 32-bit
 			offset += 4
 		case 1: // 64-bit
 			offset += 8
 		default:
-			return items, paginationToken
+			return items, paginationToken, syncToken
 		}
 	}
 
-	return items, paginationToken
+	return items, paginationToken, syncToken
 }
 
 // tryParseMediaItem attempts to parse a protobuf message as a media item
@@ -1599,8 +1685,8 @@ func tryParseMediaItem(data []byte) *MediaItem {
 				}
 			case 2:
 				// Field 2 is a nested message containing metadata including filename at sub-field 4
-				// Try to extract filename and quota usage markers from nested structure first
-				filename, countsTowardsQuota := extractField2Metadata(fieldData)
+				// Try to extract filename, quota usage markers, and status from nested structure first
+				filename, countsTowardsQuota, status := extractField2Metadata(fieldData)
 				if filename != "" {
 					item.Filename = filename
 				} else if isPrintableString(fieldData) {
@@ -1613,6 +1699,9 @@ func tryParseMediaItem(data []byte) *MediaItem {
 				}
 
 				item.CountsTowardsQuota = countsTowardsQuota
+				if status > 0 {
+					item.Status = status
+				}
 			case 3:
 				// SHA1 hash - skip for now
 			case 4:

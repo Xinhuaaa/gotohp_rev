@@ -4,6 +4,7 @@ import { MediaBrowser, ConfigManager, type MediaItem } from '../bindings/app/bac
 import Button from "./components/ui/button/Button.vue"
 import MediaItemComponent from './components/MediaItem.vue'
 import { toast } from "vue-sonner"
+import { RefreshCw } from 'lucide-vue-next'
 
 const mediaItems = ref<MediaItem[]>([])
 const loading = ref(false)
@@ -13,6 +14,7 @@ const reachedEnd = ref(false)
 const thumbnailSize = ref('medium')
 const downloadingItems = ref<Set<string>>(new Set())
 const seenMediaKeys = ref<Set<string>>(new Set())
+const syncToken = ref('')
 const DEBUG = false // Set to true to enable debug logging
 
 function debugLog(...args: any[]) {
@@ -53,7 +55,8 @@ async function loadMediaList() {
   loading.value = true
   try {
     debugLog('Loading media list with pageToken:', pageToken.value)
-    const result = await MediaBrowser.GetMediaList(pageToken.value, 50)
+    // Pass empty syncToken and passive triggerMode (2)
+    const result = await MediaBrowser.GetMediaList(pageToken.value, "", 2, 50)
     debugLog('Received result:', result)
     
     if (result && result.items) {
@@ -89,6 +92,12 @@ async function loadMediaList() {
         pageToken.value = result.nextPageToken || ''
         hasMore.value = true
       }
+      
+      // Capture sync token if present (usually at end of list)
+      if (result.syncToken) {
+        syncToken.value = result.syncToken
+        debugLog('Updated sync token:', syncToken.value)
+      }
     } else {
       // No items in response
       debugLog('No items in response - reached end')
@@ -100,6 +109,78 @@ async function loadMediaList() {
     toast.error('Failed to load photos', {
       description: error?.message,
     })
+  } finally {
+    loading.value = false
+  }
+}
+
+async function checkUpdates() {
+  if (loading.value) return
+  
+  // If we don't have a sync token, we can't do incremental update
+  // But maybe we can just reload? For now, assume sync token is needed
+  // or use empty sync token if appropriate (though backend might treat as full list)
+  if (!syncToken.value) {
+     debugLog('No sync token available, performing full reload')
+     // Could potentially reset list and reload, but let's just warn for now
+     // or silently ignore
+     return
+  }
+
+  loading.value = true
+  try {
+    debugLog('Checking for updates with syncToken:', syncToken.value)
+    // Pass syncToken and active triggerMode (1)
+    const result = await MediaBrowser.GetMediaList("", syncToken.value, 1, 50)
+    debugLog('Update result:', result)
+
+    if (result && result.items) {
+      let addedCount = 0
+      let deletedCount = 0
+      const newItems: MediaItem[] = []
+
+      result.items.forEach(item => {
+        // Status 2 means delete/remove
+        if (item.status === 2) {
+           debugLog('Processing deletion for:', item.mediaKey)
+           // Remove from list
+           const initialLen = mediaItems.value.length
+           mediaItems.value = mediaItems.value.filter(existing => existing.mediaKey !== item.mediaKey)
+           if (mediaItems.value.length < initialLen) {
+             deletedCount++
+             // Also remove from seen set
+             seenMediaKeys.value.delete(item.mediaKey)
+           }
+           return
+        }
+
+        // Otherwise (status 1 or undefined), treat as add
+        if (seenMediaKeys.value.has(item.mediaKey)) return
+        seenMediaKeys.value.add(item.mediaKey)
+        newItems.push(item)
+        addedCount++
+      })
+
+      if (addedCount > 0) {
+        debugLog(`Found ${addedCount} new items`)
+        // Prepend new items
+        mediaItems.value = [...newItems, ...mediaItems.value]
+      }
+      
+      if (addedCount > 0 || deletedCount > 0) {
+         toast.success(`Updated: ${addedCount} added, ${deletedCount} deleted`)
+      } else {
+         toast.info('No changes')
+      }
+
+      // Update sync token for next time
+      if (result.syncToken) {
+        syncToken.value = result.syncToken
+      }
+    }
+  } catch (error: any) {
+    console.error('Failed to check updates:', error)
+    toast.error('Failed to update', { description: error?.message })
   } finally {
     loading.value = false
   }
@@ -146,6 +227,16 @@ const quotaExemptItems = computed(() =>
     <div class="flex justify-between items-center mb-4">
       <h2 class="text-xl font-semibold">Photo Gallery</h2>
       <div class="flex gap-2">
+        <Button
+          v-if="syncToken"
+          variant="outline"
+          size="icon"
+          @click="checkUpdates"
+          :disabled="loading"
+          title="Check for updates"
+        >
+          <RefreshCw :class="['h-4 w-4', { 'animate-spin': loading }]" />
+        </Button>
         <Button 
           v-if="!reachedEnd || loading" 
           variant="outline" 

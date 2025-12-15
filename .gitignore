@@ -23,3 +23,19 @@ frontend/bindings/app/backend/index.ts
 frontend/bindings/app/backend/mediabrowser.ts
 frontend/bindings/app/backend/models.ts
 frontend/bindings/app/backend/utils.ts
+.proto/第二次请求_request body
+.proto/第二次请求_response body
+.proto/第三次请求_request body
+.proto/第三次请求_response body
+.proto/第一次请求_request body
+.proto/第一次请求_response body
+.proto/有变化的增量更新请求_request body
+.proto/有变化的增量更新请求_response body
+.proto/增量更新的请求_request body
+.proto/增量更新的请求_response body
+.proto/增量更新请求_删除照片_response body
+.proto/增量更新请求_新增照片_response body copy
+app.exe
+gotohp.exe
+reference/incremental_update_summary.md
+reference/protobuf_definitions.md
