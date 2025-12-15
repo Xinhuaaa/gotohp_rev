@@ -1259,7 +1259,7 @@ const minMediaKeyLength = 10
 
 // GetMediaList retrieves a list of media items from the library
 // This uses a simplified request to fetch media items with pagination support
-// pageToken should be passed from previous responses (field 1.6) for proper pagination
+// pageToken should be passed from previous responses (field 1.1) for proper pagination
 func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
 	// Build the request using raw protobuf wire format
 	// The request structure is complex, so we use a helper to build it
@@ -1336,7 +1336,7 @@ func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error
 }
 
 // buildMediaListRequest creates the protobuf request for fetching media list
-// pageToken comes from the previous response's field 1.6 and goes into request field 1.4
+// pageToken comes from the previous response's field 1.1 and goes into request field 1.4
 func buildMediaListRequest(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
