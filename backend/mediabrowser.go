@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 const (
@@ -13,14 +14,34 @@ const (
 )
 
 // MediaBrowser handles media browsing operations
-type MediaBrowser struct{}
+type MediaBrowser struct {
+	api *Api
+	mu  sync.Mutex
+}
+
+// getAPI lazily initializes and caches the API client so repeated calls (such as
+// fetching thumbnails) can reuse the same auth token instead of requesting a
+// fresh one each time.
+func (m *MediaBrowser) getAPI() (*Api, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.api != nil {
+		return m.api, nil
+	}
+
+	api, err := NewApi()
+	if err != nil {
+		return nil, err
+	}
+
+	m.api = api
+	return m.api, nil
+}
 
 // GetMediaList retrieves a paginated list of media items
 func (m *MediaBrowser) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
-	// Create a new API client for each request. While this has some overhead,
-	// it ensures we always have fresh authentication and simplifies error handling.
-	// The API client internally caches auth tokens to minimize redundant auth requests.
-	api, err := NewApi()
+	api, err := m.getAPI()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client: %w", err)
 	}
@@ -35,8 +56,7 @@ func (m *MediaBrowser) GetMediaList(pageToken string, limit int) (*MediaListResu
 
 // GetAlbumList retrieves a paginated list of albums
 func (m *MediaBrowser) GetAlbumList(pageToken string) (*AlbumListResult, error) {
-	// Create a new API client for each request
-	api, err := NewApi()
+	api, err := m.getAPI()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client: %w", err)
 	}
@@ -51,7 +71,7 @@ func (m *MediaBrowser) GetAlbumList(pageToken string) (*AlbumListResult, error) 
 
 // GetThumbnail retrieves a thumbnail for a media item and returns it as base64
 func (m *MediaBrowser) GetThumbnail(mediaKey string, size string) (string, error) {
-	api, err := NewApi()
+	api, err := m.getAPI()
 	if err != nil {
 		return "", fmt.Errorf("failed to create API client: %w", err)
 	}
@@ -81,7 +101,7 @@ func (m *MediaBrowser) GetThumbnail(mediaKey string, size string) (string, error
 
 // DownloadMedia downloads a media item to the user's Downloads folder
 func (m *MediaBrowser) DownloadMedia(mediaKey string) (string, error) {
-	api, err := NewApi()
+	api, err := m.getAPI()
 	if err != nil {
 		return "", fmt.Errorf("failed to create API client: %w", err)
 	}
