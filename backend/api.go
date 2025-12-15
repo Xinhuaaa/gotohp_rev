@@ -202,6 +202,21 @@ func (a *Api) getAuthToken() (map[string]string, error) {
 		return nil, errors.New("auth response missing Expiry")
 	}
 
+	expirySeconds, err := strconv.ParseInt(parsedAuthResponse["Expiry"], 10, 64)
+	if err == nil {
+		now := time.Now().Unix()
+		// The API returns expiry as a relative duration in seconds.
+		if expirySeconds < now {
+			expirySeconds = now + expirySeconds
+		}
+		// Refresh a little early to reduce the chance of expired tokens during requests.
+		expirySeconds = expirySeconds - 30
+		if expirySeconds < now {
+			expirySeconds = now
+		}
+		parsedAuthResponse["Expiry"] = strconv.FormatInt(expirySeconds, 10)
+	}
+
 	return parsedAuthResponse, nil
 }
 
