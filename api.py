@@ -120,6 +120,19 @@ class Api:
                 key, value = line.split("=", 1)
                 parsed_auth_response[key] = value
 
+        if expiry_raw := parsed_auth_response.get("Expiry"):
+            try:
+                expiry_seconds = int(expiry_raw)
+                now = int(time.time())
+                if expiry_seconds < now:
+                    expiry_seconds = now + expiry_seconds
+                expiry_seconds -= 30
+                if expiry_seconds < now:
+                    expiry_seconds = now
+                parsed_auth_response["Expiry"] = str(expiry_seconds)
+            except ValueError:
+                logger.warning("Unable to parse expiry from auth response: %s", expiry_raw)
+
         return parsed_auth_response
 
     def get_upload_token(self, sha_hash_b64: str, file_size: int) -> str:
