@@ -11,6 +11,7 @@ const pageToken = ref('')
 const hasMore = ref(true)
 const reachedEnd = ref(false)
 const thumbnailSize = ref('medium')
+const pageSize = ref(50)
 const downloadingItems = ref<Set<string>>(new Set())
 const seenMediaKeys = ref<Set<string>>(new Set())
 const DEBUG = false // Set to true to enable debug logging
@@ -41,6 +42,9 @@ onMounted(async () => {
     if (config.thumbnailSize) {
       thumbnailSize.value = config.thumbnailSize
     }
+    if (config.mediaPageSize && config.mediaPageSize > 0) {
+      pageSize.value = config.mediaPageSize
+    }
   } catch (error) {
     console.error('Failed to load config:', error)
   }
@@ -53,7 +57,7 @@ async function loadMediaList() {
   loading.value = true
   try {
     debugLog('Loading media list with pageToken:', pageToken.value)
-    const result = await MediaBrowser.GetMediaList(pageToken.value, 50)
+    const result = await MediaBrowser.GetMediaList(pageToken.value, pageSize.value)
     debugLog('Received result:', result)
     
     if (result && result.items) {

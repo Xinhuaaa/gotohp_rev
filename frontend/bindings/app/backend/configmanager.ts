@@ -64,5 +64,9 @@ export function SetThumbnailSize(thumbnailSize: string): $CancellablePromise<voi
     return $Call.ByID(hashCode("ConfigManager.SetThumbnailSize"), thumbnailSize);
 }
 
+export function SetMediaPageSize(mediaPageSize: number): $CancellablePromise<void> {
+    return $Call.ByID(hashCode("ConfigManager.SetMediaPageSize"), mediaPageSize);
+}
+
 // Private type creation functions
 const $$createType0 = $models.Config.createFrom;

@@ -17,6 +17,7 @@ export class Config {
     "deleteFromHost": boolean;
     "disableUnsupportedFilesFilter": boolean;
     "thumbnailSize": string;
+    "mediaPageSize": number;
 
     /** Creates a new Config instance. */
     constructor($$source: Partial<Config> = {}) {
@@ -52,6 +53,9 @@ export class Config {
         }
         if (!("thumbnailSize" in $$source)) {
             this["thumbnailSize"] = "medium";
+        }
+        if (!("mediaPageSize" in $$source)) {
+            this["mediaPageSize"] = 50;
         }
 
         Object.assign(this, $$source);

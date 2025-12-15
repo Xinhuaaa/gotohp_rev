@@ -1237,7 +1237,7 @@ type MediaItem struct {
 type MediaListResult struct {
 	Items         []MediaItem `json:"items"`
 	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.1
-	StateToken    string      `json:"stateToken,omitempty"`    // State token from response field 1.6
+	StateToken    string      `json:"stateToken,omitempty"`    // State token from response field 1.6 (when present)
 }
 
 // AlbumItem represents a single album in Google Photos
@@ -1260,11 +1260,10 @@ const minMediaKeyLength = 10
 // GetMediaList retrieves a list of media items from the library
 // This uses a simplified request to fetch media items with pagination support
 // pageToken should be passed from previous responses (field 1.1) for proper pagination
-// stateToken should be passed from previous responses (field 1.6) for state tracking
-func (a *Api) GetMediaList(pageToken string, stateToken string, limit int) (*MediaListResult, error) {
+func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
 	// Build the request using raw protobuf wire format
 	// The request structure is complex, so we use a helper to build it
-	requestData := buildMediaListRequest(pageToken, stateToken, limit)
+	requestData := buildMediaListRequest(pageToken, limit)
 
 	// Get the bearer token
 	bearerToken, err := a.BearerToken()
@@ -1338,12 +1337,11 @@ func (a *Api) GetMediaList(pageToken string, stateToken string, limit int) (*Med
 
 // buildMediaListRequest creates the protobuf request for fetching media list
 // pageToken comes from the previous response's field 1.1 and goes into request field 1.4
-// stateToken comes from the previous response's field 1.6 and goes into request field 1.6
-func buildMediaListRequest(pageToken string, stateToken string, limit int) []byte {
+func buildMediaListRequest(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// Build field 1 (request data)
-	field1 := buildMediaListRequestField1(pageToken, stateToken, limit)
+	field1 := buildMediaListRequestField1(pageToken, limit)
 	writeProtobufField(&buf, 1, field1)
 
 	// Build field 2 (additional options)
@@ -1361,7 +1359,7 @@ func truncateForLogging(s string) string {
 	return s
 }
 
-func buildMediaListRequestField1(pageToken string, stateToken string, limit int) []byte {
+func buildMediaListRequestField1(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// These field numbers correspond to the Google Photos protobuf schema for media list requests
@@ -1388,15 +1386,6 @@ func buildMediaListRequestField1(pageToken string, stateToken string, limit int)
 		log.Printf("[DEBUG] Including pagination token in request field 1.4: length=%d, preview=%s", len(pageToken), truncateForLogging(pageToken))
 	} else {
 		log.Printf("[DEBUG] No pagination token to include in request field 1.4")
-	}
-
-	// field1.6 - state token (string) - tracks library state across pagination
-	// The value comes from the previous response's field 1.6
-	if stateToken != "" {
-		writeProtobufString(&buf, 6, stateToken)
-		log.Printf("[DEBUG] Including state token in request field 1.6: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
-	} else {
-		log.Printf("[DEBUG] No state token to include in request field 1.6")
 	}
 
 	// field1.7 - type (varint = 2)
@@ -1575,15 +1564,25 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 					items = append(items, *item)
 				}
 			}
-			// Field 1 is the pagination token (for next request's field 1.4)
+
+			// Field 1 holds a nested message where sub-field 1 carries the pagination token
+			// and sub-field 6 may carry a state token.
 			if fieldNum == 1 {
-				paginationToken = string(fieldData)
-				log.Printf("[DEBUG] Extracted pagination token from response field 1: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
+				token, state := parsePaginationContainer(fieldData)
+				if token != "" {
+					paginationToken = token
+					log.Printf("[DEBUG] Extracted pagination token from response field 1.1: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
+				}
+				if state != "" {
+					stateToken = state
+					log.Printf("[DEBUG] Extracted state token from response field 1.6: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
+				}
 			}
-			// Field 6 is the state token (for next request's field 1.6)
-			if fieldNum == 6 {
-				stateToken = string(fieldData)
-				log.Printf("[DEBUG] Extracted state token from response field 6: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
+
+			// Preserve backwards compatibility if the token still arrives as field 6
+			if fieldNum == 6 && paginationToken == "" {
+				paginationToken = string(fieldData)
+				log.Printf("[DEBUG] Extracted pagination token from response field 1.6: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
 			}
 		case 5: // 32-bit
 			offset += 4
@@ -1595,6 +1594,46 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 	}
 
 	return items, paginationToken, stateToken
+}
+
+// parsePaginationContainer walks the nested message stored in response field 1
+// to extract the pagination token (sub-field 1) and optional state token (sub-field 6).
+func parsePaginationContainer(data []byte) (paginationToken string, stateToken string) {
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			break
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0: // Varint
+			_, offset = readVarint(data, offset)
+		case 2: // Length-delimited
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				return paginationToken, stateToken
+			}
+			fieldData := data[newOffset : newOffset+int(length)]
+			offset = newOffset + int(length)
+
+			if fieldNum == 1 && paginationToken == "" {
+				paginationToken = string(fieldData)
+			}
+			if fieldNum == 6 && stateToken == "" {
+				stateToken = string(fieldData)
+			}
+		case 5: // 32-bit
+			offset += 4
+		case 1: // 64-bit
+			offset += 8
+		default:
+			return paginationToken, stateToken
+		}
+	}
+
+	return paginationToken, stateToken
 }
 
 // tryParseMediaItem attempts to parse a protobuf message as a media item
