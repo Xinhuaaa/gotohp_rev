@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +23,17 @@ import (
 
 	"google.golang.org/protobuf/proto"
 )
+
+//go:embed templates/media_list_request.json
+var mediaListRequestTemplate []byte
+
+var mediaListRequestTemplateData map[string]interface{}
+
+func init() {
+	if err := json.Unmarshal(mediaListRequestTemplate, &mediaListRequestTemplateData); err != nil {
+		log.Fatalf("failed to load media list request template: %v", err)
+	}
+}
 
 // globalAuthCache stores auth tokens globally across all API instances
 // This prevents redundant auth requests when multiple operations are performed
@@ -1258,11 +1272,10 @@ type AlbumListResult struct {
 const minMediaKeyLength = 10
 
 // GetMediaList retrieves a list of media items from the library
-// This uses a simplified request to fetch media items with pagination support
+// This uses the captured protobuf request as a template to mirror the official client.
 // pageToken should be passed from previous responses (field 1.1) for proper pagination
 func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
-	// Build the request using raw protobuf wire format
-	// The request structure is complex, so we use a helper to build it
+	// Build the request using the captured protobuf template so we mirror the official client exactly.
 	requestData := buildMediaListRequest(pageToken, limit)
 
 	// Get the bearer token
@@ -1335,9 +1348,28 @@ func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error
 	return result, nil
 }
 
-// buildMediaListRequest creates the protobuf request for fetching media list
-// pageToken comes from the previous response's field 1.1 and goes into request field 1.4
+// buildMediaListRequest creates the protobuf request for fetching media list using the captured
+// template from the official client. This ensures pagination tokens are interpreted correctly
+// by the backend. If the template cannot be loaded, we fall back to the previous handcrafted
+// builder.
 func buildMediaListRequest(pageToken string, limit int) []byte {
+	if len(mediaListRequestTemplateData) > 0 {
+		templateCopy, ok := cloneInterface(mediaListRequestTemplateData).(map[string]interface{})
+		if ok {
+			if field1, ok := templateCopy["1"].(map[string]interface{}); ok {
+				field1["4"] = pageToken
+			}
+			return encodeProtoMessage(templateCopy)
+		}
+	}
+
+	log.Printf("[WARN] Using legacy media list request builder because the template could not be decoded")
+	return buildLegacyMediaListRequest(pageToken, limit)
+}
+
+// buildLegacyMediaListRequest mirrors the previous manual request builder.
+// It is retained as a safety net if the embedded template cannot be used.
+func buildLegacyMediaListRequest(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// Build field 1 (request data)
@@ -1357,6 +1389,79 @@ func truncateForLogging(s string) string {
 		return s[:50] + "..."
 	}
 	return s
+}
+
+// cloneInterface performs a deep copy on decoded JSON structures so we can safely mutate
+// the embedded template without affecting future requests.
+func cloneInterface(value interface{}) interface{} {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(v))
+		for key, val := range v {
+			result[key] = cloneInterface(val)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(v))
+		for i, val := range v {
+			result[i] = cloneInterface(val)
+		}
+		return result
+	default:
+		return v
+	}
+}
+
+// encodeProtoMessage encodes a nested map (with numeric string keys) into protobuf wire format.
+// This mirrors the structure produced by the captured official request JSON.
+func encodeProtoMessage(message map[string]interface{}) []byte {
+	var buf bytes.Buffer
+
+	keys := make([]int, 0, len(message))
+	keyLookup := make(map[int]string, len(message))
+	for key := range message {
+		fieldNum, err := strconv.Atoi(key)
+		if err != nil {
+			continue
+		}
+		keys = append(keys, fieldNum)
+		keyLookup[fieldNum] = key
+	}
+
+	sort.Ints(keys)
+
+	for _, fieldNum := range keys {
+		encodeProtoValue(&buf, fieldNum, message[keyLookup[fieldNum]])
+	}
+
+	return buf.Bytes()
+}
+
+// encodeProtoValue writes a single field (or repeated fields for slices) to the buffer using
+// the appropriate wire type based on the Go value inferred from the JSON template.
+func encodeProtoValue(buf *bytes.Buffer, fieldNum int, value interface{}) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		writeProtobufField(buf, fieldNum, encodeProtoMessage(v))
+	case []interface{}:
+		for _, item := range v {
+			encodeProtoValue(buf, fieldNum, item)
+		}
+	case string:
+		writeProtobufString(buf, fieldNum, v)
+	case float64:
+		writeProtobufVarint(buf, fieldNum, int64(v))
+	case bool:
+		if v {
+			writeProtobufVarint(buf, fieldNum, 1)
+		} else {
+			writeProtobufVarint(buf, fieldNum, 0)
+		}
+	case nil:
+	// Skip nil values
+	default:
+		log.Printf("[WARN] Unsupported proto value type %T for field %d", v, fieldNum)
+	}
 }
 
 func buildMediaListRequestField1(pageToken string, limit int) []byte {
