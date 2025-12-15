@@ -445,9 +445,8 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 	// Collect all items across pages
 	var allItems []backend.MediaItem
 	currentPageToken := pageToken
-	currentStateToken := ""     // Track state token across requests
-	lastNextPageToken := ""     // Track the next page token from the last API response
-	lastStateToken := ""        // Track the state token from the last API response
+	lastNextPageToken := "" // Track the next page token from the last API response
+	lastStateToken := ""    // Track the state token from the last API response
 	pagesRequested := 0
 	emptyPageRetries := 0 // Count consecutive empty pages
 
@@ -461,7 +460,7 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 			}
 		}
 
-		result, err := api.GetMediaList(currentPageToken, currentStateToken, limit)
+		result, err := api.GetMediaList(currentPageToken, limit)
 		if err != nil {
 			return fmt.Errorf("failed to get media list: %w", err)
 		}
@@ -476,10 +475,6 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 				fmt.Println("Page has 0 items, automatically fetching next page...")
 			}
 			currentPageToken = result.NextPageToken
-			// Update state token as well
-			if result.StateToken != "" {
-				currentStateToken = result.StateToken
-			}
 			emptyPageRetries++
 			if emptyPageRetries >= maxEmptyPages {
 				if !jsonOutput {
@@ -504,11 +499,8 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 			break
 		}
 
-		// Update tokens for next iteration
+		// Update token for next iteration
 		currentPageToken = result.NextPageToken
-		if result.StateToken != "" {
-			currentStateToken = result.StateToken
-		}
 	}
 
 	// Create final result
