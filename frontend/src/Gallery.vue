@@ -131,6 +131,14 @@ const gridCols = computed(() => {
     default: return 'grid-cols-4' // medium
   }
 })
+
+const quotaConsumingItems = computed(() =>
+  mediaItems.value.filter((item) => item.countsTowardsQuota !== false)
+)
+
+const quotaExemptItems = computed(() =>
+  mediaItems.value.filter((item) => item.countsTowardsQuota === false)
+)
 </script>
 
 <template>
@@ -158,19 +166,54 @@ const gridCols = computed(() => {
       <p class="text-sm">Upload some photos to see them here</p>
     </div>
 
-    <div v-if="mediaItems.length > 0" :class="['grid gap-2', gridCols]">
-      <div 
-        v-for="item in mediaItems" 
-        :key="item.mediaKey"
-        class="relative group aspect-square bg-secondary rounded overflow-hidden"
-      >
-        <MediaItemComponent 
-          :item="item" 
-          :thumbnail-size="thumbnailSize"
-          :is-downloading="downloadingItems.has(item.mediaKey)"
-          @download="downloadMedia(item.mediaKey, item.filename || 'photo')"
-        />
-      </div>
+    <div v-else class="space-y-6">
+      <section class="space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-medium">占用空间的照片</h3>
+          <span class="text-sm text-muted-foreground">共 {{ quotaConsumingItems.length }} 张</span>
+        </div>
+        <div v-if="quotaConsumingItems.length === 0 && !loading" class="text-sm text-muted-foreground">
+          暂无占用空间的照片
+        </div>
+        <div v-else-if="quotaConsumingItems.length > 0" :class="['grid gap-2', gridCols]">
+          <div
+            v-for="item in quotaConsumingItems"
+            :key="item.mediaKey"
+            class="relative group aspect-square bg-secondary rounded overflow-hidden"
+          >
+            <MediaItemComponent
+              :item="item"
+              :thumbnail-size="thumbnailSize"
+              :is-downloading="downloadingItems.has(item.mediaKey)"
+              @download="downloadMedia(item.mediaKey, item.filename || 'photo')"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-medium">不占用空间的照片</h3>
+          <span class="text-sm text-muted-foreground">共 {{ quotaExemptItems.length }} 张</span>
+        </div>
+        <div v-if="quotaExemptItems.length === 0 && !loading" class="text-sm text-muted-foreground">
+          暂无不占用空间的照片
+        </div>
+        <div v-else-if="quotaExemptItems.length > 0" :class="['grid gap-2', gridCols]">
+          <div
+            v-for="item in quotaExemptItems"
+            :key="item.mediaKey"
+            class="relative group aspect-square bg-secondary rounded overflow-hidden"
+          >
+            <MediaItemComponent
+              :item="item"
+              :thumbnail-size="thumbnailSize"
+              :is-downloading="downloadingItems.has(item.mediaKey)"
+              @download="downloadMedia(item.mediaKey, item.filename || 'photo')"
+            />
+          </div>
+        </div>
+      </section>
     </div>
 
     <div v-if="loading && mediaItems.length === 0" class="flex items-center justify-center h-64">
