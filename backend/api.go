@@ -30,6 +30,7 @@ type Api struct {
 	authData          string
 	client            *http.Client
 	authResponseCache map[string]string
+	Email             string
 }
 
 type AuthResponse struct {
@@ -76,6 +77,7 @@ func NewApi() (*Api, error) {
 			"Expiry": "0",
 			"Auth":   "",
 		},
+		Email: selectedEmail,
 	}
 
 	api.userAgent = fmt.Sprintf(

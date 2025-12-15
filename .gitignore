@@ -13,3 +13,13 @@ frontend/bindings/
 build/windows/icon.ico
 build/windows/info.json
 build/windows/wails.exe.manifest
+frontend/bindings/app/backend/configmanager.ts
+frontend/bindings/app/backend/index.ts
+frontend/bindings/app/backend/mediabrowser.ts
+frontend/bindings/app/backend/models.ts
+frontend/bindings/app/backend/utils.ts
+frontend/bindings/app/backend/configmanager.ts
+frontend/bindings/app/backend/index.ts
+frontend/bindings/app/backend/mediabrowser.ts
+frontend/bindings/app/backend/models.ts
+frontend/bindings/app/backend/utils.ts

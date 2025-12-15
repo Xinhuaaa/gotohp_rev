@@ -26,7 +26,8 @@ func (m *MediaBrowser) getAPI() (*Api, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.api != nil {
+	// Chek if we have a cached API instance and if it matches the currently selected account
+	if m.api != nil && m.api.Email == AppConfig.Selected {
 		return m.api, nil
 	}
 
