@@ -1236,8 +1236,8 @@ type MediaItem struct {
 // MediaListResult contains the result of a media list request
 type MediaListResult struct {
 	Items         []MediaItem `json:"items"`
-	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.6
-	StateToken    string      `json:"stateToken,omitempty"`    // State token from response field 1.1 (when present)
+	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.1
+	StateToken    string      `json:"stateToken,omitempty"`    // State token from response field 1.6 (when present)
 }
 
 // AlbumItem represents a single album in Google Photos
@@ -1564,13 +1564,23 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 					items = append(items, *item)
 				}
 			}
-			// Field 1 is a token that may be returned in some responses
+
+			// Field 1 holds a nested message where sub-field 1 carries the pagination token
+			// and sub-field 6 may carry a state token.
 			if fieldNum == 1 {
-				stateToken = string(fieldData)
-				log.Printf("[DEBUG] Extracted state token from response field 1: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
+				token, state := parsePaginationContainer(fieldData)
+				if token != "" {
+					paginationToken = token
+					log.Printf("[DEBUG] Extracted pagination token from response field 1.1: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
+				}
+				if state != "" {
+					stateToken = state
+					log.Printf("[DEBUG] Extracted state token from response field 1.6: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
+				}
 			}
-			// Field 6 is the pagination token we need for the next request's field 1.4
-			if fieldNum == 6 {
+
+			// Preserve backwards compatibility if the token still arrives as field 6
+			if fieldNum == 6 && paginationToken == "" {
 				paginationToken = string(fieldData)
 				log.Printf("[DEBUG] Extracted pagination token from response field 1.6: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
 			}
@@ -1584,6 +1594,46 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 	}
 
 	return items, paginationToken, stateToken
+}
+
+// parsePaginationContainer walks the nested message stored in response field 1
+// to extract the pagination token (sub-field 1) and optional state token (sub-field 6).
+func parsePaginationContainer(data []byte) (paginationToken string, stateToken string) {
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			break
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0: // Varint
+			_, offset = readVarint(data, offset)
+		case 2: // Length-delimited
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				return paginationToken, stateToken
+			}
+			fieldData := data[newOffset : newOffset+int(length)]
+			offset = newOffset + int(length)
+
+			if fieldNum == 1 && paginationToken == "" {
+				paginationToken = string(fieldData)
+			}
+			if fieldNum == 6 && stateToken == "" {
+				stateToken = string(fieldData)
+			}
+		case 5: // 32-bit
+			offset += 4
+		case 1: // 64-bit
+			offset += 8
+		default:
+			return paginationToken, stateToken
+		}
+	}
+
+	return paginationToken, stateToken
 }
 
 // tryParseMediaItem attempts to parse a protobuf message as a media item
