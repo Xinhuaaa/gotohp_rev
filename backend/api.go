@@ -1236,8 +1236,8 @@ type MediaItem struct {
 // MediaListResult contains the result of a media list request
 type MediaListResult struct {
 	Items         []MediaItem `json:"items"`
-	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.1
-	StateToken    string      `json:"stateToken,omitempty"`    // State token from response field 1.6
+	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.6
+	StateToken    string      `json:"stateToken,omitempty"`    // State token from response field 1.1 (when present)
 }
 
 // AlbumItem represents a single album in Google Photos
@@ -1259,12 +1259,11 @@ const minMediaKeyLength = 10
 
 // GetMediaList retrieves a list of media items from the library
 // This uses a simplified request to fetch media items with pagination support
-// pageToken should be passed from previous responses (field 1.1) for proper pagination
-// stateToken should be passed from previous responses (field 1.6) for state tracking
-func (a *Api) GetMediaList(pageToken string, stateToken string, limit int) (*MediaListResult, error) {
+// pageToken should be passed from previous responses (field 1.6) for proper pagination
+func (a *Api) GetMediaList(pageToken string, limit int) (*MediaListResult, error) {
 	// Build the request using raw protobuf wire format
 	// The request structure is complex, so we use a helper to build it
-	requestData := buildMediaListRequest(pageToken, stateToken, limit)
+	requestData := buildMediaListRequest(pageToken, limit)
 
 	// Get the bearer token
 	bearerToken, err := a.BearerToken()
@@ -1337,13 +1336,12 @@ func (a *Api) GetMediaList(pageToken string, stateToken string, limit int) (*Med
 }
 
 // buildMediaListRequest creates the protobuf request for fetching media list
-// pageToken comes from the previous response's field 1.1 and goes into request field 1.4
-// stateToken comes from the previous response's field 1.6 and goes into request field 1.6
-func buildMediaListRequest(pageToken string, stateToken string, limit int) []byte {
+// pageToken comes from the previous response's field 1.6 and goes into request field 1.4
+func buildMediaListRequest(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// Build field 1 (request data)
-	field1 := buildMediaListRequestField1(pageToken, stateToken, limit)
+	field1 := buildMediaListRequestField1(pageToken, limit)
 	writeProtobufField(&buf, 1, field1)
 
 	// Build field 2 (additional options)
@@ -1361,7 +1359,7 @@ func truncateForLogging(s string) string {
 	return s
 }
 
-func buildMediaListRequestField1(pageToken string, stateToken string, limit int) []byte {
+func buildMediaListRequestField1(pageToken string, limit int) []byte {
 	var buf bytes.Buffer
 
 	// These field numbers correspond to the Google Photos protobuf schema for media list requests
@@ -1388,15 +1386,6 @@ func buildMediaListRequestField1(pageToken string, stateToken string, limit int)
 		log.Printf("[DEBUG] Including pagination token in request field 1.4: length=%d, preview=%s", len(pageToken), truncateForLogging(pageToken))
 	} else {
 		log.Printf("[DEBUG] No pagination token to include in request field 1.4")
-	}
-
-	// field1.6 - state token (string) - tracks library state across pagination
-	// The value comes from the previous response's field 1.6
-	if stateToken != "" {
-		writeProtobufString(&buf, 6, stateToken)
-		log.Printf("[DEBUG] Including state token in request field 1.6: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
-	} else {
-		log.Printf("[DEBUG] No state token to include in request field 1.6")
 	}
 
 	// field1.7 - type (varint = 2)
@@ -1575,15 +1564,15 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 					items = append(items, *item)
 				}
 			}
-			// Field 1 is the pagination token (for next request's field 1.4)
+			// Field 1 is a token that may be returned in some responses
 			if fieldNum == 1 {
-				paginationToken = string(fieldData)
-				log.Printf("[DEBUG] Extracted pagination token from response field 1: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
-			}
-			// Field 6 is the state token (for next request's field 1.6)
-			if fieldNum == 6 {
 				stateToken = string(fieldData)
-				log.Printf("[DEBUG] Extracted state token from response field 6: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
+				log.Printf("[DEBUG] Extracted state token from response field 1: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
+			}
+			// Field 6 is the pagination token we need for the next request's field 1.4
+			if fieldNum == 6 {
+				paginationToken = string(fieldData)
+				log.Printf("[DEBUG] Extracted pagination token from response field 1.6: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
 			}
 		case 5: // 32-bit
 			offset += 4
