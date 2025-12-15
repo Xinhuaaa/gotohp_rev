@@ -931,7 +931,7 @@ func tryExtractMediaItem(data []byte, targetMediaKey string) *MediaItem {
 
 // tryParseMediaItemWithKey parses a message that might contain a media item with the target key
 func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
-	item := &MediaItem{}
+	item := &MediaItem{CountsTowardsQuota: true}
 
 	offset := 0
 	for offset < len(data) {
@@ -984,7 +984,7 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 				}
 			case 2:
 				// Field 2 contains nested metadata with filename at sub-field 4
-				filename := extractFilenameFromField2(fieldData)
+				filename, quotaExempt := extractField2Metadata(fieldData)
 				if filename != "" {
 					item.Filename = filename
 				} else if isPrintableString(fieldData) {
@@ -995,6 +995,10 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 					} else if item.DedupKey == "" {
 						item.DedupKey = str
 					}
+				}
+
+				if quotaExempt {
+					item.CountsTowardsQuota = false
 				}
 			}
 		case 5: // 32-bit
@@ -1009,10 +1013,12 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 	return item
 }
 
-// extractFilenameFromField2 extracts the filename from field 2 of a media item
-// Based on the structure: field2 -> field4 = filename
-func extractFilenameFromField2(data []byte) string {
+// extractField2Metadata extracts the filename and quota usage hint from field 2 of a media item
+// Based on the structure: field2 -> field4 = filename, field2 -> field22 = quota exemption marker
+func extractField2Metadata(data []byte) (string, bool) {
 	offset := 0
+	filename := ""
+	quotaExempt := false
 	for offset < len(data) {
 		fieldNum, wireType, newOffset := readTag(data, offset)
 		if newOffset < 0 {
@@ -1026,24 +1032,27 @@ func extractFilenameFromField2(data []byte) string {
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
-				return ""
+				return filename, quotaExempt
 			}
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
 
-			// Field 4 is the filename
+			// Field 4 is the filename, field 22 indicates a quota exemption marker
 			if fieldNum == 4 && isPrintableString(fieldData) {
-				return string(fieldData)
+				filename = string(fieldData)
+			}
+			if fieldNum == 22 {
+				quotaExempt = true
 			}
 		case 5: // 32-bit
 			offset += 4
 		case 1: // 64-bit
 			offset += 8
 		default:
-			return ""
+			return filename, quotaExempt
 		}
 	}
-	return ""
+	return filename, quotaExempt
 }
 
 // GetThumbnail retrieves a thumbnail for a media item
@@ -1192,6 +1201,9 @@ type MediaItem struct {
 	Filename  string `json:"filename,omitempty"`
 	MediaType string `json:"mediaType,omitempty"` // "photo" or "video"
 	Timestamp int64  `json:"timestamp,omitempty"`
+	// CountsTowardsQuota indicates whether the item consumes storage quota.
+	// Items carrying certain metadata (e.g., field 22 in the response) are treated as quota-exempt.
+	CountsTowardsQuota bool `json:"countsTowardsQuota"`
 }
 
 // MediaListResult contains the result of a media list request
@@ -1525,7 +1537,7 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string) {
 
 // tryParseMediaItem attempts to parse a protobuf message as a media item
 func tryParseMediaItem(data []byte) *MediaItem {
-	item := &MediaItem{}
+	item := &MediaItem{CountsTowardsQuota: true}
 
 	offset := 0
 	for offset < len(data) {
@@ -1577,8 +1589,9 @@ func tryParseMediaItem(data []byte) *MediaItem {
 				}
 			case 2:
 				// Field 2 is a nested message containing metadata including filename at sub-field 4
-				// Try to extract filename from nested structure first
-				if filename := extractFilenameFromField2(fieldData); filename != "" {
+				// Try to extract filename and quota usage markers from nested structure first
+				filename, quotaExempt := extractField2Metadata(fieldData)
+				if filename != "" {
 					item.Filename = filename
 				} else if isPrintableString(fieldData) {
 					// Fallback: Could be filename or dedup key directly
@@ -1587,6 +1600,10 @@ func tryParseMediaItem(data []byte) *MediaItem {
 					} else if item.DedupKey == "" {
 						item.DedupKey = string(fieldData)
 					}
+				}
+
+				if quotaExempt {
+					item.CountsTowardsQuota = false
 				}
 			case 3:
 				// SHA1 hash - skip for now

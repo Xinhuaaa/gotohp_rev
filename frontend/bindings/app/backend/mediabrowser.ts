@@ -16,6 +16,7 @@ export interface MediaItem {
     filename?: string;
     mediaType?: string;
     timestamp?: number;
+    countsTowardsQuota?: boolean;
 }
 
 export interface MediaListResult {
