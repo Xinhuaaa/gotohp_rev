@@ -1006,6 +1006,16 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 		default:
 			return item
 		}
+
+		// Field 22 indicates quota usage (at item level)
+		if fieldNum == 22 {
+			item.CountsTowardsQuota = true
+		}
+
+		// Field 22 indicates quota usage (at item level)
+		if fieldNum == 22 {
+			item.CountsTowardsQuota = true
+		}
 	}
 
 	return item
@@ -1616,6 +1626,11 @@ func tryParseMediaItem(data []byte) *MediaItem {
 			offset += 8
 		default:
 			return item
+		}
+
+		// Field 22 indicates quota usage (at item level)
+		if fieldNum == 22 {
+			item.CountsTowardsQuota = true
 		}
 	}
 

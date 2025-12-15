@@ -9,3 +9,7 @@ wails_windows_amd64.syso
 *.zip
 gotohp-cli
 gotohp
+frontend/bindings/
+build/windows/icon.ico
+build/windows/info.json
+build/windows/wails.exe.manifest
