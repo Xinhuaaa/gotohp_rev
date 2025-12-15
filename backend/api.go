@@ -1236,8 +1236,8 @@ type MediaItem struct {
 // MediaListResult contains the result of a media list request
 type MediaListResult struct {
 	Items         []MediaItem `json:"items"`
-	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.1
-	StateToken    string      `json:"stateToken,omitempty"`    // State token from response field 1.6
+	NextPageToken string      `json:"nextPageToken,omitempty"` // Pagination token from response field 1.6
+	StateToken    string      `json:"stateToken,omitempty"`    // State token from response field 1.1 (when present)
 }
 
 // AlbumItem represents a single album in Google Photos
@@ -1564,15 +1564,15 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 					items = append(items, *item)
 				}
 			}
-			// Field 1 is the pagination token (for next request's field 1.4)
+			// Field 1 is a token that may be returned in some responses
 			if fieldNum == 1 {
-				paginationToken = string(fieldData)
-				log.Printf("[DEBUG] Extracted pagination token from response field 1: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
-			}
-			// Field 6 is the state token (for next request's field 1.6)
-			if fieldNum == 6 {
 				stateToken = string(fieldData)
-				log.Printf("[DEBUG] Extracted state token from response field 6: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
+				log.Printf("[DEBUG] Extracted state token from response field 1: length=%d, preview=%s", len(stateToken), truncateForLogging(stateToken))
+			}
+			// Field 6 is the pagination token we need for the next request's field 1.4
+			if fieldNum == 6 {
+				paginationToken = string(fieldData)
+				log.Printf("[DEBUG] Extracted pagination token from response field 1.6: length=%d, preview=%s", len(paginationToken), truncateForLogging(paginationToken))
 			}
 		case 5: // 32-bit
 			offset += 4

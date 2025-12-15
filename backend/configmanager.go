@@ -25,6 +25,7 @@ type Config struct {
 	DeleteFromHost                bool     `json:"deleteFromHost" koanf:"delete_from_host"`
 	DisableUnsupportedFilesFilter bool     `json:"disableUnsupportedFilesFilter" koanf:"disable_unsupported_files_filter"`
 	ThumbnailSize                 string   `json:"thumbnailSize" koanf:"thumbnail_size"`
+	MediaPageSize                 int      `json:"mediaPageSize" koanf:"media_page_size"`
 }
 
 type ConfigManager struct{}
@@ -35,6 +36,7 @@ var ConfigPath string
 var DefaultConfig = Config{
 	UploadThreads: 3,
 	ThumbnailSize: "medium",
+	MediaPageSize: 50,
 }
 
 // ParseAuthString parses an auth string and returns url.Values (exported for CLI use)
@@ -105,6 +107,14 @@ func (g *ConfigManager) SetThumbnailSize(thumbnailSize string) {
 		return
 	}
 	AppConfig.ThumbnailSize = thumbnailSize
+	saveAppConfig()
+}
+
+func (g *ConfigManager) SetMediaPageSize(mediaPageSize int) {
+	if mediaPageSize < 1 {
+		return
+	}
+	AppConfig.MediaPageSize = mediaPageSize
 	saveAppConfig()
 }
 

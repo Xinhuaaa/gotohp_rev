@@ -30,6 +30,7 @@ interface Settings {
     disableUnsupportedFilesFilter: boolean
     uploadThreads: number
     thumbnailSize: string
+    mediaPageSize: number
 }
 
 const settings = ref<Settings>({
@@ -41,7 +42,8 @@ const settings = ref<Settings>({
     deleteFromHost: false,
     disableUnsupportedFilesFilter: false,
     uploadThreads: 0,
-    thumbnailSize: 'medium'
+    thumbnailSize: 'medium',
+    mediaPageSize: 50,
 })
 
 onMounted(async () => {
@@ -55,7 +57,8 @@ onMounted(async () => {
         deleteFromHost: config.deleteFromHost || false,
         disableUnsupportedFilesFilter: config.disableUnsupportedFilesFilter || false,
         uploadThreads: config.uploadThreads || 1,
-        thumbnailSize: config.thumbnailSize || 'medium'
+        thumbnailSize: config.thumbnailSize || 'medium',
+        mediaPageSize: config.mediaPageSize || 50,
     }
 })
 
@@ -100,6 +103,14 @@ watch(() => settings.value.uploadThreads, async (newValue) => {
 watch(() => settings.value.thumbnailSize, async (newValue) => {
     await ConfigManager.SetThumbnailSize(newValue)
 })
+
+watch(() => settings.value.mediaPageSize, async (newValue) => {
+    if (newValue < 1) {
+        settings.value.mediaPageSize = 1
+    } else {
+        await ConfigManager.SetMediaPageSize(newValue)
+    }
+})
 </script>
 
 <template>
@@ -108,6 +119,14 @@ watch(() => settings.value.thumbnailSize, async (newValue) => {
             <Label for="upload-threads" class="size-full">Upload Threads</Label>
             <NumberFieldContent>
                 <NumberFieldDecrement class="cursor-pointer" :disabled="settings.uploadThreads <= 1" />
+                <NumberFieldInput />
+                <NumberFieldIncrement class="cursor-pointer" />
+            </NumberFieldContent>
+        </NumberField>
+        <NumberField v-model="settings.mediaPageSize" class="flex items-center justify-between">
+            <Label for="media-page-size" class="size-full">Media Page Size</Label>
+            <NumberFieldContent>
+                <NumberFieldDecrement class="cursor-pointer" :disabled="settings.mediaPageSize <= 1" />
                 <NumberFieldInput />
                 <NumberFieldIncrement class="cursor-pointer" />
             </NumberFieldContent>
