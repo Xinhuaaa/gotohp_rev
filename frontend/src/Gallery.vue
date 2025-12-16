@@ -4,7 +4,7 @@ import { MediaBrowser, ConfigManager, type MediaItem } from '../bindings/app/bac
 import Button from "./components/ui/button/Button.vue"
 import MediaItemComponent from './components/MediaItem.vue'
 import { toast } from "vue-sonner"
-import { RefreshCw } from 'lucide-vue-next'
+import { RefreshCw, Trash2 } from 'lucide-vue-next'
 
 const mediaItems = ref<MediaItem[]>([])
 const loading = ref(false)
@@ -75,6 +75,7 @@ async function loadMediaList() {
       // Add new items to the list
       if (newItems.length > 0) {
         mediaItems.value = [...mediaItems.value, ...newItems]
+        console.log('Loaded items:', newItems) // Debug: Check for isTrash
       }
       
       // Check if we've reached the end
@@ -213,12 +214,16 @@ const gridCols = computed(() => {
   }
 })
 
+const trashItems = computed(() =>
+  mediaItems.value.filter((item) => (item as any).isTrash)
+)
+
 const quotaConsumingItems = computed(() =>
-  mediaItems.value.filter((item) => item.countsTowardsQuota !== false)
+  mediaItems.value.filter((item) => !(item as any).isTrash && item.countsTowardsQuota !== false)
 )
 
 const quotaExemptItems = computed(() =>
-  mediaItems.value.filter((item) => item.countsTowardsQuota === false)
+  mediaItems.value.filter((item) => !(item as any).isTrash && item.countsTowardsQuota === false)
 )
 </script>
 
@@ -258,6 +263,30 @@ const quotaExemptItems = computed(() =>
     </div>
 
     <div v-else class="space-y-6">
+      <section class="space-y-3" v-if="trashItems.length > 0">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-medium flex items-center gap-2">
+            <Trash2 class="w-5 h-5 text-red-500" />
+            回收站的照片
+          </h3>
+          <span class="text-sm text-muted-foreground">共 {{ trashItems.length }} 张</span>
+        </div>
+        <div :class="['grid gap-2', gridCols]">
+          <div
+            v-for="item in trashItems"
+            :key="item.mediaKey"
+            class="relative group aspect-square bg-secondary rounded overflow-hidden border-2 border-red-200/50"
+          >
+            <MediaItemComponent
+              :item="item"
+              :thumbnail-size="thumbnailSize"
+              :is-downloading="downloadingItems.has(item.mediaKey)"
+              @download="downloadMedia(item.mediaKey, item.filename || 'photo')"
+            />
+          </div>
+        </div>
+      </section>
+
       <section class="space-y-3">
         <div class="flex items-center justify-between">
           <h3 class="text-lg font-medium">占用空间的照片</h3>

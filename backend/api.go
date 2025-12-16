@@ -986,7 +986,7 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 				}
 			case 2:
 				// Field 2 contains nested metadata with filename at sub-field 4
-				filename, countsTowardsQuota, _ := extractField2Metadata(fieldData)
+				filename, countsTowardsQuota, _, isTrash := extractField2Metadata(fieldData)
 				if filename != "" {
 					item.Filename = filename
 				} else if isPrintableString(fieldData) {
@@ -1000,6 +1000,9 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 				}
 
 				item.CountsTowardsQuota = countsTowardsQuota
+				if isTrash {
+					item.IsTrash = true
+				}
 			}
 		case 5: // 32-bit
 			offset += 4
@@ -1026,11 +1029,12 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 // extractField2Metadata extracts the filename, quota usage hint, and status from field 2 of a media item
 // Based on the structure: field2 -> field4 = filename, field2 -> field22 = quota consumption marker
 // field2 -> field16 -> field1 = status (1=Add, 2=Delete)
-func extractField2Metadata(data []byte) (string, bool, int) {
+func extractField2Metadata(data []byte) (string, bool, int, bool) {
 	offset := 0
 	filename := ""
 	countsTowardsQuota := false
 	status := 0
+	isTrash := false
 	for offset < len(data) {
 		fieldNum, wireType, newOffset := readTag(data, offset)
 		if newOffset < 0 {
@@ -1040,18 +1044,22 @@ func extractField2Metadata(data []byte) (string, bool, int) {
 
 		switch wireType {
 		case 0: // Varint
-			_, offset = readVarint(data, offset)
+			val, newOffset := readVarint(data, offset)
+			offset = newOffset
+			if fieldNum == 26 && val == 1096 {
+				isTrash = true
+			}
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
-				return filename, countsTowardsQuota, status
+				return filename, countsTowardsQuota, status, isTrash
 			}
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
 
 			// Field 2 nested message (recursion)
 			if fieldNum == 2 {
-				fName, cQuota, s := extractField2Metadata(fieldData)
+				fName, cQuota, s, iTrash := extractField2Metadata(fieldData)
 				if fName != "" && filename == "" {
 					filename = fName
 				}
@@ -1060,6 +1068,9 @@ func extractField2Metadata(data []byte) (string, bool, int) {
 				}
 				if s > 0 {
 					status = s
+				}
+				if iTrash {
+					isTrash = true
 				}
 			}
 
@@ -1074,6 +1085,9 @@ func extractField2Metadata(data []byte) (string, bool, int) {
 				s := parseStatusField(fieldData)
 				if s > 0 {
 					status = s
+					if status == 2 {
+						isTrash = true
+					}
 				}
 			}
 
@@ -1085,10 +1099,10 @@ func extractField2Metadata(data []byte) (string, bool, int) {
 		case 1: // 64-bit
 			offset += 8
 		default:
-			return filename, countsTowardsQuota, status
+			return filename, countsTowardsQuota, status, isTrash
 		}
 	}
-	return filename, countsTowardsQuota, status
+	return filename, countsTowardsQuota, status, isTrash
 }
 
 // parseStatusField extracts the status from field 16
@@ -1276,6 +1290,7 @@ type MediaItem struct {
 	// Field 22 in the response marks items that do consume quota; items without it are treated as quota-exempt.
 	CountsTowardsQuota bool `json:"countsTowardsQuota"`
 	Status             int  `json:"status,omitempty"` // 1=Add, 2=Remove/Update
+	IsTrash            bool `json:"isTrash,omitempty"`
 }
 
 // MediaListResult contains the result of a media list request
@@ -1686,7 +1701,7 @@ func tryParseMediaItem(data []byte) *MediaItem {
 			case 2:
 				// Field 2 is a nested message containing metadata including filename at sub-field 4
 				// Try to extract filename, quota usage markers, and status from nested structure first
-				filename, countsTowardsQuota, status := extractField2Metadata(fieldData)
+				filename, countsTowardsQuota, status, isTrash := extractField2Metadata(fieldData)
 				if filename != "" {
 					item.Filename = filename
 				} else if isPrintableString(fieldData) {
@@ -1701,6 +1716,9 @@ func tryParseMediaItem(data []byte) *MediaItem {
 				item.CountsTowardsQuota = countsTowardsQuota
 				if status > 0 {
 					item.Status = status
+				}
+				if isTrash {
+					item.IsTrash = true
 				}
 			case 3:
 				// SHA1 hash - skip for now
