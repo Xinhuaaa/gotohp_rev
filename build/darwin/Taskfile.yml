@@ -40,6 +40,38 @@ tasks:
       - lipo -create -output "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
       - rm "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
 
+  build:cli:
+    summary: Builds the CLI-only application for macOS (no Wails/WebView dependencies)
+    dir: '{{.ROOT_DIR}}'
+    deps:
+      - task: common:go:mod:tidy
+    cmds:
+      - go build {{.BUILD_FLAGS}} -tags cli -o {{.OUTPUT}}
+    vars:
+      BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-trimpath -buildvcs=false -ldflags="-w -s"{{else}}-buildvcs=false -gcflags=all="-l"{{end}}'
+      DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}-cli'
+      OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
+    env:
+      GOOS: darwin
+      CGO_ENABLED: 0
+      GOARCH: '{{.ARCH | default ARCH}}'
+      PRODUCTION: '{{.PRODUCTION | default "false"}}'
+
+  build:cli:universal:
+    summary: Builds darwin universal CLI binary (arm64 + amd64)
+    deps:
+      - task: build:cli
+        vars:
+          ARCH: amd64
+          OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-cli-amd64"
+      - task: build:cli
+        vars:
+          ARCH: arm64
+          OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-cli-arm64"
+    cmds:
+      - lipo -create -output "{{.BIN_DIR}}/{{.APP_NAME}}-cli-universal" "{{.BIN_DIR}}/{{.APP_NAME}}-cli-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-cli-arm64"
+      - rm "{{.BIN_DIR}}/{{.APP_NAME}}-cli-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-cli-arm64"
+
   package:
     summary: Packages a production build of the application into a `.app` bundle
     deps:

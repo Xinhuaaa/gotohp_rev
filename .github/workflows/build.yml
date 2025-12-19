@@ -79,52 +79,45 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install Wails3
-        run: go install -v github.com/wailsapp/wails/v3/cmd/wails3@latest
+      - name: Install Task
+        run: |
+          go install github.com/go-task/task/v3/cmd/task@latest
 
       - name: Build macOS App (Production)
         run: |
           mkdir -p release
-          wails3 doctor
 
-          # Update build assets
-          wails3 task common:update:build-assets
-
-          # Build the app package
-          wails3 task darwin:package:universal
-
-          # Create zip file of the .app bundle
-          cd bin
-          zip -r ../release/gotohp-macos-universal.zip gotohp.app
-          cd ..
+          # Build the universal CLI application
+          task darwin:build:cli:universal PRODUCTION=true
+          mv bin/gotohp-cli-universal "gotohp-macos-cli-universal"
+          zip -r release/gotohp-macos-cli-universal.zip gotohp-macos-cli-universal
 
       - name: Build macOS App (Debug)
         if: (github.event_name == 'workflow_dispatch' && inputs.build_debug) || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
         run: |
           # Clean bin directory
-          rm -rf bin/gotohp.app
-          rm -f bin/gotohp
+          rm -f bin/gotohp-cli-universal
 
-          # Build debug version (creates binary, not .app)
-          wails3 build
+          # Build debug version
+          task darwin:build:cli:universal
 
           # Rename debug binary
-          mv bin/gotohp release/gotohp-macos-universal_debug
+          mv bin/gotohp-cli-universal "release/gotohp-macos-cli-universal_debug"
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-artifact
           path: |
-            release/gotohp-macos-universal.zip
-            release/gotohp-macos-universal_debug
+            release/gotohp-macos-cli-universal.zip
+            release/gotohp-macos-cli-universal_debug
 
       - name: Upload to Draft Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/gotohp-macos-universal.zip
-            release/gotohp-macos-universal_debug
+            release/gotohp-macos-cli-universal.zip
+            release/gotohp-macos-cli-universal_debug
           tag_name: ${{ steps.set-tag.outputs.tag_name }}
           name: ${{ steps.set-tag.outputs.release_name }}
           body: ${{ steps.set-tag.outputs.release_body }}
