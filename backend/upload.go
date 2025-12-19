@@ -9,8 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // ProgressCallback is a function type for upload progress updates
@@ -242,14 +240,6 @@ func filterGooglePhotosFiles(paths []string) ([]string, error) {
 
 // UploadFile is an exported version for CLI use with callback
 func UploadFile(ctx context.Context, api *Api, filePath string, workerID int, callback ProgressCallback) (string, error) {
-	return uploadFileWithCallback(ctx, api, filePath, workerID, callback)
-}
-
-func uploadFile(ctx context.Context, api *Api, filePath string, workerID int, app *application.App) (string, error) {
-	// Create a callback that emits Wails events
-	callback := func(event string, data any) {
-		app.Event.Emit(event, data)
-	}
 	return uploadFileWithCallback(ctx, api, filePath, workerID, callback)
 }
 
