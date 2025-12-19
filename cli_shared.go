@@ -48,22 +48,13 @@ func runCLI() {
 	case "upload":
 		// Check for help flag first
 		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
-			fmt.Println("Usage: gotohp upload <filepath> [flags]")
-			fmt.Println("\nFlags:")
-			fmt.Println("  -r, --recursive              Include subdirectories")
-			fmt.Println("  -t, --threads <n>            Number of upload threads (default: 3)")
-			fmt.Println("  -f, --force                  Force upload even if file exists")
-			fmt.Println("  -d, --delete                 Delete from host after upload")
-			fmt.Println("  -df, --disable-filter        Disable file type filtering")
-			fmt.Println("  -l, --log-level <level>      Set log level: debug, info, warn, error (default: info)")
-			fmt.Println("  -c, --config <path>          Path to config file")
+			printUploadHelp()
 			return
 		}
 
 		if len(os.Args) < 3 {
 			fmt.Println("Error: filepath required")
-			fmt.Println("Usage: gotohp upload <filepath> [flags]")
-			fmt.Println("\nRun 'gotohp upload --help' for more information")
+			printUploadHelp()
 			os.Exit(1)
 		}
 
@@ -398,13 +389,7 @@ func runCLI() {
 	case "autowash":
 		// Check for help
 		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
-			fmt.Println("Usage: gotohp autowash [flags]")
-			fmt.Println("\nFlags:")
-			fmt.Println("  -i, --interval <duration>    Check interval (default: 1h, e.g. 30m, 2h)")
-			fmt.Println("  --db <path>                  Database file path (default: media_db.json)")
-			fmt.Println("  --backup-dir <path>          Directory for temporary downloads (default: Downloads/gotohp_backup)")
-			fmt.Println("  -r, --retention <days>       Days to keep downloaded files (default: 7)")
-			fmt.Println("  -c, --config <path>          Path to config file")
+			printAutoWashHelp()
 			return
 		}
 
@@ -523,16 +508,45 @@ func printCLIHelp() {
 	fmt.Println("  gotohp <command>    Run CLI command")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  upload <filepath>   Upload a file to Google Photos")
-	fmt.Println("  download <media-key> Download a file from Google Photos")
-	fmt.Println("  thumbnail <media-key> Download a thumbnail at various sizes")
+	fmt.Println("  upload              Upload files to Google Photos")
+	fmt.Println("  download            Download a file from Google Photos")
+	fmt.Println("  thumbnail           Download a thumbnail at various sizes")
 	fmt.Println("  list, ls            List media items in Google Photos")
 	fmt.Println("  albums              List albums in Google Photos")
+	fmt.Println("  autowash            Start auto-wash service to sync and backup")
 	fmt.Println("  creds               Manage Google Photos credentials")
 	fmt.Println("  help                Show this help message")
 	fmt.Println("  version             Show version information")
 	fmt.Println()
 	fmt.Println("Run 'gotohp <command> --help' for more information on a command")
+}
+
+func printUploadHelp() {
+	fmt.Println("Usage: gotohp upload <filepath> [flags]")
+	fmt.Println()
+	fmt.Println("Upload files or directories to Google Photos.")
+	fmt.Println()
+	fmt.Println("Flags:")
+	fmt.Println("  -r, --recursive              Include subdirectories")
+	fmt.Println("  -t, --threads <n>            Number of upload threads (default: 3)")
+	fmt.Println("  -f, --force                  Force upload even if file exists")
+	fmt.Println("  -d, --delete                 Delete from host after upload")
+	fmt.Println("  -df, --disable-filter        Disable file type filtering")
+	fmt.Println("  -l, --log-level <level>      Set log level: debug, info, warn, error (default: info)")
+	fmt.Println("  -c, --config <path>          Path to config file")
+}
+
+func printAutoWashHelp() {
+	fmt.Println("Usage: gotohp autowash [flags]")
+	fmt.Println()
+	fmt.Println("Start auto-wash service to automatically sync library and backup media.")
+	fmt.Println()
+	fmt.Println("Flags:")
+	fmt.Println("  -i, --interval <duration>    Check interval (default: 1h, e.g. 30m, 2h)")
+	fmt.Println("  --db <path>                  Database file path (default: media_db.json)")
+	fmt.Println("  --backup-dir <path>          Directory for temporary downloads (default: Downloads/gotohp_backup)")
+	fmt.Println("  -r, --retention <days>       Days to keep downloaded files (default: 7)")
+	fmt.Println("  -c, --config <path>          Path to config file")
 }
 
 func printDownloadHelp() {
