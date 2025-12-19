@@ -9,10 +9,20 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 //go:embed build/windows/info.json
 var versionInfo embed.FS
+
+var (
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99"))
+	commandStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
+	flagStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
+	argStyle     = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("245"))
+	exampleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+)
 
 // getAppVersion returns version from embedded info.json
 func getAppVersion() string {
@@ -501,128 +511,170 @@ func containsSubstring(str, substr string) bool {
 }
 
 func printCLIHelp() {
-	fmt.Println("gotohp - Google Photos unofficial client")
+	fmt.Println(titleStyle.Render("gotohp - Unofficial Google Photos CLI & GUI"))
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  gotohp              Launch GUI application")
-	fmt.Println("  gotohp <command>    Run CLI command")
+	fmt.Printf("  %s              Launch GUI application\n", commandStyle.Render("gotohp"))
+	fmt.Printf("  %s %s    Run CLI command\n", commandStyle.Render("gotohp"), argStyle.Render("<command>"))
 	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  upload              Upload files to Google Photos")
-	fmt.Println("  download            Download a file from Google Photos")
-	fmt.Println("  thumbnail           Download a thumbnail at various sizes")
-	fmt.Println("  list, ls            List media items in Google Photos")
-	fmt.Println("  albums              List albums in Google Photos")
-	fmt.Println("  autowash            Start auto-wash service to sync and backup")
-	fmt.Println("  creds               Manage Google Photos credentials")
-	fmt.Println("  help                Show this help message")
-	fmt.Println("  version             Show version information")
+	fmt.Println("Core Commands:")
+	fmt.Printf("  %s          Upload files or directories to Google Photos\n", commandStyle.Render("upload"))
+	fmt.Printf("  %s        Download a file from Google Photos by media key\n", commandStyle.Render("download"))
+	fmt.Printf("  %s       List media items in your library\n", commandStyle.Render("list, ls"))
+	fmt.Printf("  %s          List your albums\n", commandStyle.Render("albums"))
 	fmt.Println()
-	fmt.Println("Run 'gotohp <command> --help' for more information on a command")
+	fmt.Println("Advanced Commands:")
+	fmt.Printf("  %s       Manage Google Photos credentials/accounts\n", commandStyle.Render("creds"))
+	fmt.Printf("  %s       Start auto-sync and backup service\n", commandStyle.Render("autowash"))
+	fmt.Printf("  %s   Download a thumbnail (various sizes available)\n", commandStyle.Render("thumbnail"))
+	fmt.Println()
+	fmt.Println("System Commands:")
+	fmt.Printf("  %s            Show this help message\n", commandStyle.Render("help, -h"))
+	fmt.Printf("  %s         Show version information\n", commandStyle.Render("version, -v"))
+	fmt.Println()
+	fmt.Println("Options:")
+	fmt.Println("  Use 'gotohp <command> --help' for detailed information on any command.")
+}
+
+func printFlag(short, long, arg, description string) {
+	var flagPart string
+	if short != "" {
+		flagPart = fmt.Sprintf("  %s, %s", flagStyle.Render(short), flagStyle.Render(long))
+	} else {
+		flagPart = fmt.Sprintf("      %s", flagStyle.Render(long))
+	}
+	
+	if arg != "" {
+		flagPart += " " + argStyle.Render(arg)
+	}
+	
+	// Pad flagPart to a consistent width
+	plainFlagPart := lipgloss.ClearString(flagPart)
+	padding := 30 - len(plainFlagPart)
+	if padding < 1 {
+		padding = 1
+	}
+	
+	fmt.Printf("%s%s%s\n", flagPart, strings.Repeat(" ", padding), description)
 }
 
 func printUploadHelp() {
-	fmt.Println("Usage: gotohp upload <filepath> [flags]")
+	fmt.Printf("Usage: %s %s %s %s\n", commandStyle.Render("gotohp"), commandStyle.Render("upload"), argStyle.Render("<filepath>"), flagStyle.Render("[flags]"))
 	fmt.Println()
 	fmt.Println("Upload files or directories to Google Photos.")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -r, --recursive              Include subdirectories")
-	fmt.Println("  -t, --threads <n>            Number of upload threads (default: 3)")
-	fmt.Println("  -f, --force                  Force upload even if file exists")
-	fmt.Println("  -d, --delete                 Delete from host after upload")
-	fmt.Println("  -df, --disable-filter        Disable file type filtering")
-	fmt.Println("  -l, --log-level <level>      Set log level: debug, info, warn, error (default: info)")
-	fmt.Println("  -c, --config <path>          Path to config file")
+	printFlag("-r", "--recursive", "", "Include subdirectories")
+	printFlag("-t", "--threads", "<n>", "Number of upload threads (default: 3)")
+	printFlag("-f", "--force", "", "Force upload even if file exists")
+	printFlag("-d", "--delete", "", "Delete from host after upload")
+	printFlag("-df", "--disable-filter", "", "Disable file type filtering")
+	printFlag("-l", "--log-level", "<level>", "Set log level: debug, info, warn, error (default: info)")
+	printFlag("-c", "--config", "<path>", "Path to config file")
 }
 
 func printAutoWashHelp() {
-	fmt.Println("Usage: gotohp autowash [flags]")
+	fmt.Printf("Usage: %s %s %s\n", commandStyle.Render("gotohp"), commandStyle.Render("autowash"), flagStyle.Render("[flags]"))
 	fmt.Println()
 	fmt.Println("Start auto-wash service to automatically sync library and backup media.")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -i, --interval <duration>    Check interval (default: 1h, e.g. 30m, 2h)")
-	fmt.Println("  --db <path>                  Database file path (default: media_db.json)")
-	fmt.Println("  --backup-dir <path>          Directory for temporary downloads (default: Downloads/gotohp_backup)")
-	fmt.Println("  -r, --retention <days>       Days to keep downloaded files (default: 7)")
-	fmt.Println("  -c, --config <path>          Path to config file")
+	printFlag("-i", "--interval", "<duration>", "Check interval (default: 1h, e.g. 30m, 2h)")
+	printFlag("", "--db", "<path>", "Database file path (default: media_db.json)")
+	printFlag("", "--backup-dir", "<path>", "Directory for temporary downloads (default: Downloads/gotohp_backup)")
+	printFlag("-r", "--retention", "<days>", "Days to keep downloaded files (default: 7)")
+	printFlag("-c", "--config", "<path>", "Path to config file")
 }
 
 func printDownloadHelp() {
-	fmt.Println("Usage: gotohp download <media-key> [flags]")
+	fmt.Printf("Usage: %s %s %s %s\n", commandStyle.Render("gotohp"), commandStyle.Render("download"), argStyle.Render("<media-key>"), flagStyle.Render("[flags]"))
 	fmt.Println()
 	fmt.Println("Download a file from Google Photos using its media key.")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -o, --output <path>  Output file path (default: current directory with original filename)")
-	fmt.Println("  --original           Download the original file instead of the edited version")
-	fmt.Println("  -c, --config <path>  Path to config file")
+	printFlag("-o", "--output", "<path>", "Output file path (default: original filename)")
+	printFlag("", "--original", "", "Download the original file instead of edited")
+	printFlag("-c", "--config", "<path>", "Path to config file")
 }
 
 func printThumbnailHelp() {
-	fmt.Println("Usage: gotohp thumbnail <media-key> [flags]")
+	fmt.Printf("Usage: %s %s %s %s\n", commandStyle.Render("gotohp"), commandStyle.Render("thumbnail"), argStyle.Render("<media-key>"), flagStyle.Render("[flags]"))
 	fmt.Println()
 	fmt.Println("Download a thumbnail of a media item at various sizes.")
 	fmt.Println()
 	fmt.Println("Size Presets (--size, -s):")
-	fmt.Println("  small    - 50x50 pixels")
-	fmt.Println("  medium   - 800x800 pixels")
-	fmt.Println("  large    - 1600x1600 pixels")
+	fmt.Printf("  %-10s - 50x50 pixels\n", argStyle.Render("small"))
+	fmt.Printf("  %-10s - 800x800 pixels\n", argStyle.Render("medium"))
+	fmt.Printf("  %-10s - 1600x1600 pixels\n", argStyle.Render("large"))
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -o, --output <path>   Output file path (default: <media-key>_thumb.jpg)")
-	fmt.Println("  -s, --size <preset>   Use a size preset (small, medium, large)")
-	fmt.Println("  -w, --width <pixels>  Custom thumbnail width in pixels")
-	fmt.Println("  -h, --height <pixels> Custom thumbnail height in pixels (note: use after -w to avoid conflict with --help)")
-	fmt.Println("  --overlay             Include overlay (e.g., play symbol for videos)")
-	fmt.Println("  --png                 Get PNG format instead of JPEG")
-	fmt.Println("  -c, --config <path>   Path to config file")
+	printFlag("-o", "--output", "<path>", "Output file path")
+	printFlag("-s", "--size", "<preset>", "Use a size preset (small, medium, large)")
+	printFlag("-w", "--width", "<pixels>", "Custom thumbnail width in pixels")
+	printFlag("-h", "--height", "<pixels>", "Custom thumbnail height in pixels")
+	printFlag("", "--overlay", "", "Include overlay (e.g., play symbol for videos)")
+	printFlag("", "--png", "", "Get PNG format instead of JPEG")
+	printFlag("-c", "--config", "<path>", "Path to config file")
 	fmt.Println()
 	fmt.Println("Examples:")
-	fmt.Println("  gotohp thumbnail ABC123 --size medium")
-	fmt.Println("  gotohp thumbnail ABC123 -w 640 -h 480")
-	fmt.Println("  gotohp thumbnail ABC123 --size large -o photo_thumb.jpg")
+	fmt.Printf("  %s\n", exampleStyle.Render("gotohp thumbnail ABC123 --size medium"))
+	fmt.Printf("  %s\n", exampleStyle.Render("gotohp thumbnail ABC123 -w 640 -h 480"))
 }
 
 func printListHelp() {
-	fmt.Println("Usage: gotohp list [flags]")
+	fmt.Printf("Usage: %s %s %s\n", commandStyle.Render("gotohp"), commandStyle.Render("list"), flagStyle.Render("[flags]"))
 	fmt.Println()
 	fmt.Println("List media items in your Google Photos library.")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  --pages <n>              Number of pages to fetch (default: 1)")
-	fmt.Println("  --max-empty-pages <n>    Maximum consecutive empty pages to skip (default: 10)")
-	fmt.Println("  -p, --page-token <t>     Page token for pagination")
-	fmt.Println("  -j, --json               Output in JSON format")
-	fmt.Println("  -c, --config <path>      Path to config file")
+	printFlag("", "--pages", "<n>", "Number of pages to fetch (default: 1)")
+	printFlag("", "--max-empty-pages", "<n>", "Max consecutive empty pages to skip (default: 10)")
+	printFlag("-p", "--page-token", "<t>", "Page token for pagination")
+	printFlag("-j", "--json", "", "Output in JSON format")
+	printFlag("-c", "--config", "<path>", "Path to config file")
 	fmt.Println()
-	fmt.Println("If a page returns 0 items, the next page will be fetched automatically.")
+	fmt.Println("Note: If a page returns 0 items, the next page will be fetched automatically.")
 }
 
 func printAlbumsHelp() {
-	fmt.Println("Usage: gotohp albums [flags]")
+	fmt.Printf("Usage: %s %s %s\n", commandStyle.Render("gotohp"), commandStyle.Render("albums"), flagStyle.Render("[flags]"))
 	fmt.Println()
 	fmt.Println("List albums in your Google Photos library.")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  --pages <n>              Number of pages to fetch (default: 1)")
-	fmt.Println("  --page-token <t>         Page token for pagination")
-	fmt.Println("  -j, --json               Output in JSON format")
-	fmt.Println("  -c, --config <path>      Path to config file")
-	fmt.Println()
-	fmt.Println("Note: The album list uses a fixed request format where only the page")
-	fmt.Println("      token changes between requests.")
+	printFlag("", "--pages", "<n>", "Number of pages to fetch (default: 1)")
+	printFlag("", "--page-token", "<t>", "Page token for pagination")
+	printFlag("-j", "--json", "", "Output in JSON format")
+	printFlag("-c", "--config", "<path>", "Path to config file")
 }
 
 func printCredentialsHelp() {
-	fmt.Println("Usage: gotohp creds <subcommand> [args]")
+	fmt.Printf("Usage: %s %s %s %s\n", commandStyle.Render("gotohp"), commandStyle.Render("creds"), argStyle.Render("<subcommand>"), flagStyle.Render("[args]"))
+	fmt.Println()
+	fmt.Println("Manage Google Photos credentials and accounts.")
 	fmt.Println()
 	fmt.Println("Subcommands:")
-	fmt.Println("  add <auth-string>       Add a new credential")
-	fmt.Println("  remove, rm <email>      Remove a credential by email")
-	fmt.Println("  list, ls                List all credentials")
-	fmt.Println("  set, select <email>     Set active credential (supports partial matching)")
+	
+	printSubcommand := func(cmd, arg, desc string) {
+		fullCmd := commandStyle.Render(cmd)
+		if arg != "" {
+			fullCmd += " " + argStyle.Render(arg)
+		}
+		padding := 30 - len(lipgloss.ClearString(fullCmd))
+		if padding < 1 {
+			padding = 1
+		}
+		fmt.Printf("  %s%s%s\n", fullCmd, strings.Repeat(" ", padding), desc)
+	}
+
+	printSubcommand("add", "<auth-string>", "Add a new credential")
+	printSubcommand("remove, rm", "<email>", "Remove a credential by email")
+	printSubcommand("list, ls", "", "List all stored credentials")
+	printSubcommand("set, select", "<email>", "Set active credential")
+	
+	fmt.Println()
+	fmt.Println("Flags:")
+	printFlag("-c", "--config", "<path>", "Path to config file")
 }
 
 func handleCredentialsCommand(args []string) {
