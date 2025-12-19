@@ -549,8 +549,7 @@ func printFlag(short, long, arg, description string) {
 	}
 	
 	// Pad flagPart to a consistent width
-	plainFlagPart := lipgloss.ClearString(flagPart)
-	padding := 30 - len(plainFlagPart)
+	padding := 30 - lipgloss.Width(flagPart)
 	if padding < 1 {
 		padding = 1
 	}
@@ -660,7 +659,7 @@ func printCredentialsHelp() {
 		if arg != "" {
 			fullCmd += " " + argStyle.Render(arg)
 		}
-		padding := 30 - len(lipgloss.ClearString(fullCmd))
+		padding := 30 - lipgloss.Width(fullCmd)
 		if padding < 1 {
 			padding = 1
 		}
