@@ -33,6 +33,67 @@ type Api struct {
 	Email             string
 }
 
+func (a *Api) doProtobufPOST(endpoint string, requestData []byte) ([]byte, error) {
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	headers := map[string]string{
+		"Accept-Encoding":          "gzip",
+		"Accept-Language":          a.language,
+		"Content-Type":             "application/x-protobuf",
+		"User-Agent":               a.userAgent,
+		"Authorization":            "Bearer " + bearerToken,
+		"x-goog-ext-173412678-bin": "CgcIAhClARgC",
+		"x-goog-ext-174067345-bin": "CgIIAg==",
+	}
+
+	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(requestData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var reader io.Reader = resp.Body
+		if resp.Header.Get("Content-Encoding") == "gzip" {
+			gz, gzErr := gzip.NewReader(resp.Body)
+			if gzErr != nil {
+				return nil, fmt.Errorf("request failed with status %d (gzip reader error: %v)", resp.StatusCode, gzErr)
+			}
+			defer gz.Close()
+			reader = gz
+		}
+		body, _ := io.ReadAll(reader)
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer reader.(*gzip.Reader).Close()
+	}
+
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return bodyBytes, nil
+}
+
 type AuthResponse struct {
 	Expiry string
 	Auth   string
@@ -88,6 +149,15 @@ func NewApi() (*Api, error) {
 	)
 
 	return api, nil
+}
+
+func buildUserAgent(clientVersionCode int64, language string, model string) string {
+	return fmt.Sprintf(
+		"com.google.android.apps.photos/%d (Linux; U; Android 9; %s; %s; Build/PQ2A.190205.001; Cronet/127.0.6510.5) (gzip)",
+		clientVersionCode,
+		language,
+		model,
+	)
 }
 
 func (a *Api) BearerToken() (string, error) {
@@ -447,14 +517,19 @@ func (a *Api) CommitUpload(
 		uploadTimestamp = time.Now().Unix()
 	}
 
+	model := a.model
+	userAgent := a.userAgent
+
 	var qualityVal int64 = 3
 	if AppConfig.Saver {
 		qualityVal = 1
-		a.model = "Pixel 2"
+		model = "Pixel 2"
+		userAgent = buildUserAgent(a.clientVersionCode, a.language, model)
 	}
 
 	if AppConfig.UseQuota {
-		a.model = "Pixel 8"
+		model = "Pixel 8"
+		userAgent = buildUserAgent(a.clientVersionCode, a.language, model)
 	}
 
 	unknownInt := int64(46000000)
@@ -476,7 +551,7 @@ func (a *Api) CommitUpload(
 			Field10: 1,
 		},
 		Field2: &generated.CommitUploadField2Type{
-			Model:             a.model,
+			Model:             model,
 			Make:              a.make,
 			AndroidApiVersion: a.androidAPIVersion,
 		},
@@ -500,7 +575,7 @@ func (a *Api) CommitUpload(
 		"accept-Encoding":          "gzip",
 		"accept-Language":          a.language,
 		"content-Type":             "application/x-protobuf",
-		"user-Agent":               a.userAgent,
+		"user-Agent":               userAgent,
 		"authorization":            "Bearer " + bearerToken,
 		"x-goog-ext-173412678-bin": "CgcIAhClARgC",
 		"x-goog-ext-174067345-bin": "CgIIAg==",
@@ -556,6 +631,127 @@ func (a *Api) CommitUpload(
 	}
 
 	// Get media key from response
+	if pbResp.GetField1() == nil || pbResp.GetField1().GetField3() == nil {
+		return "", fmt.Errorf("upload rejected by API: invalid response structure")
+	}
+
+	mediaKey := pbResp.GetField1().GetField3().GetMediaKey()
+	if mediaKey == "" {
+		return "", fmt.Errorf("upload rejected by API: no media key returned")
+	}
+
+	return mediaKey, nil
+}
+
+// CommitUploadOverride commits an upload with explicit client model and quality, bypassing AppConfig-based defaults.
+// This is used for workflows like "washing" quota-consuming items by re-uploading with a different client profile.
+func (a *Api) CommitUploadOverride(
+	uploadResponseDecoded *generated.CommitToken,
+	fileName string,
+	sha1Hash []byte,
+	uploadTimestamp int64,
+	model string,
+	qualityVal int64,
+) (string, error) {
+	if uploadTimestamp == 0 {
+		uploadTimestamp = time.Now().Unix()
+	}
+	if model == "" {
+		model = a.model
+	}
+	if qualityVal == 0 {
+		qualityVal = 3
+	}
+	userAgent := buildUserAgent(a.clientVersionCode, a.language, model)
+
+	unknownInt := int64(46000000)
+
+	protoBody := generated.CommitUpload{
+		Field1: &generated.CommitUploadField1Type{
+			Field1: &generated.CommitUploadField1TypeField1Type{
+				Field1: uploadResponseDecoded.Field1,
+				Field2: uploadResponseDecoded.Field2,
+			},
+			FileName: fileName,
+			Sha1Hash: sha1Hash,
+			Field4: &generated.CommitUploadField1TypeField4Type{
+				FileLastModifiedTimestamp: uploadTimestamp,
+				Field2:                    unknownInt,
+			},
+			Quality: qualityVal,
+			Field10: 1,
+		},
+		Field2: &generated.CommitUploadField2Type{
+			Model:             model,
+			Make:              a.make,
+			AndroidApiVersion: a.androidAPIVersion,
+		},
+		Field3: []byte{1, 3},
+	}
+
+	serializedData, err := proto.Marshal(&protoBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal protobuf: %w", err)
+	}
+
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	headers := map[string]string{
+		"accept-Encoding":          "gzip",
+		"accept-Language":          a.language,
+		"content-Type":             "application/x-protobuf",
+		"user-Agent":               userAgent,
+		"authorization":            "Bearer " + bearerToken,
+		"x-goog-ext-173412678-bin": "CgcIAhClARgC",
+		"x-goog-ext-174067345-bin": "CgIIAg==",
+	}
+
+	req, err := http.NewRequest(
+		"POST",
+		"https://photosdata-pa.googleapis.com/6439526531001121323/16538846908252377752",
+		bytes.NewReader(serializedData),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer reader.(*gzip.Reader).Close()
+	}
+
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var pbResp generated.CommitUploadResponse
+	if err := proto.Unmarshal(bodyBytes, &pbResp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal protobuf: %w", err)
+	}
+
 	if pbResp.GetField1() == nil || pbResp.GetField1().GetField3() == nil {
 		return "", fmt.Errorf("upload rejected by API: invalid response structure")
 	}
@@ -783,6 +979,116 @@ func (a *Api) GetMediaInfo(mediaKey string) (*MediaItem, error) {
 	return item, nil
 }
 
+const moveToTrashEndpoint = "https://photosdata-pa.googleapis.com/6439526531001121323/17490284929287180316"
+
+// MoveToTrash moves media items to trash (soft delete).
+// dedupKeys should be the mediaKey strings used in list responses.
+func (a *Api) MoveToTrash(dedupKeys []string) error {
+	if len(dedupKeys) == 0 {
+		return fmt.Errorf("no keys provided")
+	}
+
+	keys := make([]string, 0, len(dedupKeys))
+	for _, k := range dedupKeys {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("no valid keys provided")
+	}
+
+	requestData := buildMoveToTrashRequest(keys, a.clientVersionCode, a.androidAPIVersion)
+
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	headers := map[string]string{
+		"Accept-Encoding": "gzip",
+		"Accept-Language": a.language,
+		"Content-Type":    "application/x-protobuf",
+		"User-Agent":      a.userAgent,
+		"Authorization":   "Bearer " + bearerToken,
+		"x-goog-ext-173412678-bin": "CgcIAhClARgC",
+		"x-goog-ext-174067345-bin": "CgIIAg==",
+	}
+
+	req, err := http.NewRequest("POST", moveToTrashEndpoint, bytes.NewReader(requestData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var reader io.Reader = resp.Body
+		if resp.Header.Get("Content-Encoding") == "gzip" {
+			gz, gzErr := gzip.NewReader(resp.Body)
+			if gzErr != nil {
+				return fmt.Errorf("request failed with status %d (gzip reader error: %v)", resp.StatusCode, gzErr)
+			}
+			defer gz.Close()
+			reader = gz
+		}
+		body, _ := io.ReadAll(reader)
+		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Success: the current implementation treats any 2xx as OK and ignores response protobuf.
+	return nil
+}
+
+func buildMoveToTrashRequest(dedupKeys []string, clientVersionCode int64, androidAPIVersion int64) []byte {
+	var buf bytes.Buffer
+
+	// Field 2: operation type = 1 (move to trash)
+	writeProtobufVarint(&buf, 2, 1)
+
+	// Field 3: repeated item keys (mediaKey strings)
+	for _, k := range dedupKeys {
+		writeProtobufString(&buf, 3, k)
+	}
+
+	// Field 4: operation mode = 1
+	writeProtobufVarint(&buf, 4, 1)
+
+	// Field 8: fixed nested meta structure
+	var field8 bytes.Buffer
+	var field8_4 bytes.Buffer
+	writeProtobufField(&field8_4, 2, []byte{}) // 8.4.2 = {}
+	var field8_4_3 bytes.Buffer
+	writeProtobufField(&field8_4_3, 1, []byte{}) // 8.4.3.1 = {}
+	writeProtobufField(&field8_4, 3, field8_4_3.Bytes())
+	writeProtobufField(&field8_4, 4, []byte{}) // 8.4.4 = {}
+	var field8_4_5 bytes.Buffer
+	writeProtobufField(&field8_4_5, 1, []byte{}) // 8.4.5.1 = {}
+	writeProtobufField(&field8_4, 5, field8_4_5.Bytes())
+	writeProtobufField(&field8, 4, field8_4.Bytes())
+	writeProtobufField(&buf, 8, field8.Bytes())
+
+	// Field 9: client info
+	var field9 bytes.Buffer
+	writeProtobufVarint(&field9, 1, 5) // 9.1 = 5
+	var field9_2 bytes.Buffer
+	writeProtobufVarint(&field9_2, 1, clientVersionCode)                    // 9.2.1
+	writeProtobufString(&field9_2, 2, fmt.Sprintf("%d", androidAPIVersion)) // 9.2.2
+	writeProtobufField(&field9, 2, field9_2.Bytes())
+	writeProtobufField(&buf, 9, field9.Bytes())
+
+	return buf.Bytes()
+}
+
 // buildGetMediaInfoRequest creates a protobuf request to get info for a specific media key
 func buildGetMediaInfoRequest(mediaKey string) []byte {
 	var buf bytes.Buffer
@@ -802,9 +1108,45 @@ func buildGetMediaInfoRequestField1(mediaKey string) []byte {
 	var buf bytes.Buffer
 
 	// field1.1 - media metadata options (file info, timestamps, etc.)
-	mediaMetadataFields := []int{1, 3, 4, 5, 6, 7, 15, 16, 17, 19, 20, 21, 25, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41}
-	field1_1 := buildEmptyNestedMessage(mediaMetadataFields)
-	writeProtobufField(&buf, 1, field1_1)
+	// Structure:
+	// 1.1:
+	//   1: { 19: "", 20: "", 25: "", 30: { 2: "" } }
+	//   3..41: ""
+	//   21: { 1: <mode>, 5: { 3: "" } }
+
+	var field1_1 bytes.Buffer
+
+	// 1.1.1
+	var field1_1_1 bytes.Buffer
+	writeProtobufString(&field1_1_1, 19, "")
+	writeProtobufString(&field1_1_1, 20, "")
+	writeProtobufString(&field1_1_1, 25, "")
+	
+	var field1_1_1_30 bytes.Buffer
+	writeProtobufString(&field1_1_1_30, 2, "")
+	writeProtobufField(&field1_1_1, 30, field1_1_1_30.Bytes())
+	
+	writeProtobufField(&field1_1, 1, field1_1_1.Bytes())
+
+	// 1.1.x (simple strings)
+	simpleFields := []int{3, 4, 5, 6, 7, 15, 16, 17, 19, 20, 25, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41}
+	for _, f := range simpleFields {
+		writeProtobufString(&field1_1, f, "")
+	}
+
+	// 1.1.21 (dedup key request)
+	trashMode := int64(2)
+	if !AppConfig.RequestTrashItems {
+		trashMode = 1
+	}
+	var field1_1_21 bytes.Buffer
+	writeProtobufVarint(&field1_1_21, 1, trashMode)
+	var field1_1_21_5 bytes.Buffer
+	writeProtobufString(&field1_1_21_5, 3, "")
+	writeProtobufField(&field1_1_21, 5, field1_1_21_5.Bytes())
+	writeProtobufField(&field1_1, 21, field1_1_21.Bytes())
+
+	writeProtobufField(&buf, 1, field1_1.Bytes())
 
 	// field1.3 - album and collection options
 	albumOptions := []int{2, 3, 7, 8, 14, 16, 17, 18, 19, 20, 21, 22, 23, 27, 29, 30, 31, 32, 34, 37, 38, 39, 41}
@@ -854,7 +1196,7 @@ func selectBetterItem(current, candidate *MediaItem) *MediaItem {
 // for the target media key. Returns nil if no matching item is found.
 func parseMediaInfoResponse(data []byte, targetMediaKey string) *MediaItem {
 	// Parse the response using the same logic as media list parsing
-	items, _, _ := extractMediaItemsFromResponse(data, 0)
+	items, _, _ := extractMediaItemsFromResponse(data)
 
 	// Find the matching item (prefer ones with filename)
 	var matchedItem *MediaItem
@@ -893,7 +1235,11 @@ func tryExtractMediaItem(data []byte, targetMediaKey string) *MediaItem {
 
 		switch wireType {
 		case 0: // Varint
-			_, offset = readVarint(data, offset)
+			_, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				return result
+			}
+			offset = newOffset
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
@@ -921,14 +1267,141 @@ func tryExtractMediaItem(data []byte, targetMediaKey string) *MediaItem {
 				}
 			}
 		case 5: // 32-bit
+			if offset+4 > len(data) {
+				return result
+			}
 			offset += 4
 		case 1: // 64-bit
+			if offset+8 > len(data) {
+				return result
+			}
 			offset += 8
-		default:
+		case 3: // Start group
+			newOffset, ok := skipGroup(data, offset, fieldNum)
+			if !ok {
+				return result
+			}
+			offset = newOffset
+		case 4: // End group
 			return result
+		default:
+			newOffset, ok := skipField(data, wireType, offset, fieldNum)
+			if !ok {
+				return result
+			}
+			offset = newOffset
 		}
 	}
+
 	return result
+}
+
+// PermanentlyDelete permanently deletes media items by dedup key (2.21.1).
+func (a *Api) PermanentlyDelete(dedupKeys []string) error {
+	if len(dedupKeys) == 0 {
+		return fmt.Errorf("no keys provided")
+	}
+
+	keys := make([]string, 0, len(dedupKeys))
+	for _, k := range dedupKeys {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("no valid keys provided")
+	}
+
+	requestData := buildPermanentlyDeleteRequest(keys)
+
+	bearerToken, err := a.BearerToken()
+	if err != nil {
+		return fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	headers := map[string]string{
+		"Accept-Encoding":          "gzip",
+		"Accept-Language":          a.language,
+		"Content-Type":             "application/x-protobuf",
+		"User-Agent":               a.userAgent,
+		"Authorization":            "Bearer " + bearerToken,
+		"x-goog-ext-173412678-bin": "CgcIAhClARgC",
+		"x-goog-ext-174067345-bin": "CgIIAg==",
+	}
+
+	req, err := http.NewRequest("POST", moveToTrashEndpoint, bytes.NewReader(requestData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var reader io.Reader = resp.Body
+		if resp.Header.Get("Content-Encoding") == "gzip" {
+			gz, gzErr := gzip.NewReader(resp.Body)
+			if gzErr != nil {
+				return fmt.Errorf("request failed with status %d (gzip reader error: %v)", resp.StatusCode, gzErr)
+			}
+			defer gz.Close()
+			reader = gz
+		}
+		body, _ := io.ReadAll(reader)
+		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// buildPermanentlyDeleteRequest builds the protobuf request described by:
+// {
+//   "2": 2,
+//   "3": "<dedupKey>",
+//   "4": 2,
+//   "8": { "4": { "2": "", "3": { "1": "" }, "4": "", "5": { "1": "" } } },
+//   "9": ""
+// }
+func buildPermanentlyDeleteRequest(dedupKeys []string) []byte {
+	var buf bytes.Buffer
+
+	// Field 2: operation type = 2 (permanent delete)
+	writeProtobufVarint(&buf, 2, 2)
+
+	// Field 3: repeated item keys (dedup keys)
+	for _, k := range dedupKeys {
+		writeProtobufString(&buf, 3, k)
+	}
+
+	// Field 4: operation mode = 2
+	writeProtobufVarint(&buf, 4, 2)
+
+	// Field 8: fixed nested meta structure (same shape as trash request)
+	var field8 bytes.Buffer
+	var field8_4 bytes.Buffer
+	writeProtobufField(&field8_4, 2, []byte{}) // 8.4.2 = ""
+	var field8_4_3 bytes.Buffer
+	writeProtobufField(&field8_4_3, 1, []byte{}) // 8.4.3.1 = ""
+	writeProtobufField(&field8_4, 3, field8_4_3.Bytes())
+	writeProtobufField(&field8_4, 4, []byte{}) // 8.4.4 = ""
+	var field8_4_5 bytes.Buffer
+	writeProtobufField(&field8_4_5, 1, []byte{}) // 8.4.5.1 = ""
+	writeProtobufField(&field8_4, 5, field8_4_5.Bytes())
+	writeProtobufField(&field8, 4, field8_4.Bytes())
+	writeProtobufField(&buf, 8, field8.Bytes())
+
+	// Field 9: present as empty string in captured request
+	writeProtobufString(&buf, 9, "")
+
+	return buf.Bytes()
 }
 
 // tryParseMediaItemWithKey parses a message that might contain a media item with the target key
@@ -946,6 +1419,9 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 		switch wireType {
 		case 0: // Varint
 			val, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				return item
+			}
 			offset = newOffset
 			if fieldNum == 5 {
 				if val == 1 {
@@ -970,17 +1446,18 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 				} else {
 					// Try to parse nested message
 					nested := tryParseMediaItemWithKey(fieldData, targetMediaKey)
-					if nested != nil && nested.MediaKey != "" {
-						// Only update MediaKey if it matches target or we don't have one yet
-						if item.MediaKey == "" {
+					if nested != nil {
+						if item.MediaKey == "" && nested.MediaKey != "" {
 							item.MediaKey = nested.MediaKey
 						}
-						// Always update filename and media type if available
-						if nested.Filename != "" && item.Filename == "" {
+						if item.Filename == "" && nested.Filename != "" {
 							item.Filename = nested.Filename
 						}
-						if nested.MediaType != "" && item.MediaType == "" {
+						if item.MediaType == "" && nested.MediaType != "" {
 							item.MediaType = nested.MediaType
+						}
+						if item.DedupKey == "" && nested.DedupKey != "" {
+							item.DedupKey = nested.DedupKey
 						}
 					}
 				}
@@ -999,22 +1476,48 @@ func tryParseMediaItemWithKey(data []byte, targetMediaKey string) *MediaItem {
 					}
 				}
 
-				item.CountsTowardsQuota = countsTowardsQuota
+				if countsTowardsQuota {
+					item.CountsTowardsQuota = true
+				}
 				if isTrash {
 					item.IsTrash = true
 				}
+				if item.DedupKey == "" {
+					item.DedupKey = extractDedupKeyFromField2(fieldData)
+				}
+			case 6:
+				// Field 6 is often a nested message that also contains the media key at sub-field 1
+				if item.MediaKey == "" {
+					nested := tryParseMediaItem(fieldData)
+					if nested != nil && nested.MediaKey != "" {
+						item.MediaKey = nested.MediaKey
+					}
+				}
 			}
 		case 5: // 32-bit
+			if offset+4 > len(data) {
+				return item
+			}
 			offset += 4
 		case 1: // 64-bit
+			if offset+8 > len(data) {
+				return item
+			}
 			offset += 8
-		default:
+		case 3: // Start group
+			newOffset, ok := skipGroup(data, offset, fieldNum)
+			if !ok {
+				return item
+			}
+			offset = newOffset
+		case 4: // End group
 			return item
-		}
-
-		// Field 22 indicates quota usage (at item level)
-		if fieldNum == 22 {
-			item.CountsTowardsQuota = true
+		default:
+			newOffset, ok := skipField(data, wireType, offset, fieldNum)
+			if !ok {
+				return item
+			}
+			offset = newOffset
 		}
 
 		// Field 22 indicates quota usage (at item level)
@@ -1092,7 +1595,9 @@ func extractField2Metadata(data []byte) (string, bool, int, bool) {
 			}
 
 			if fieldNum == 22 {
-				countsTowardsQuota = true
+				if parseQuotaInfo(fieldData) {
+					countsTowardsQuota = true
+				}
 			}
 		case 5: // 32-bit
 			offset += 4
@@ -1103,6 +1608,129 @@ func extractField2Metadata(data []byte) (string, bool, int, bool) {
 		}
 	}
 	return filename, countsTowardsQuota, status, isTrash
+}
+
+func extractDedupKeyFromField21(data []byte) string {
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			return ""
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0:
+			_, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				return ""
+			}
+			offset = newOffset
+		case 2:
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				return ""
+			}
+			fieldData := data[newOffset : newOffset+int(length)]
+			offset = newOffset + int(length)
+			// 21.1 = dedup key string
+			if fieldNum == 1 && isPrintableString(fieldData) {
+				return string(fieldData)
+			}
+		case 5:
+			if offset+4 > len(data) {
+				return ""
+			}
+			offset += 4
+		case 1:
+			if offset+8 > len(data) {
+				return ""
+			}
+			offset += 8
+		case 3:
+			newOffset, ok := skipGroup(data, offset, fieldNum)
+			if !ok {
+				return ""
+			}
+			offset = newOffset
+		case 4:
+			return ""
+		default:
+			newOffset, ok := skipField(data, wireType, offset, fieldNum)
+			if !ok {
+				return ""
+			}
+			offset = newOffset
+		}
+	}
+	return ""
+}
+
+// extractDedupKeyFromField2 extracts field 2.21.1 (dedup key) from the media item metadata message.
+func extractDedupKeyFromField2(data []byte) string {
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			return ""
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0:
+			_, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				return ""
+			}
+			offset = newOffset
+		case 2:
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				return ""
+			}
+			fieldData := data[newOffset : newOffset+int(length)]
+			offset = newOffset + int(length)
+
+			// 2.21 = nested message containing the dedup key at 2.21.1
+			if fieldNum == 21 {
+				if k := extractDedupKeyFromField21(fieldData); k != "" {
+					return k
+				}
+			}
+
+			// field 2 sometimes nests itself; recurse.
+			if fieldNum == 2 {
+				if k := extractDedupKeyFromField2(fieldData); k != "" {
+					return k
+				}
+			}
+		case 5:
+			if offset+4 > len(data) {
+				return ""
+			}
+			offset += 4
+		case 1:
+			if offset+8 > len(data) {
+				return ""
+			}
+			offset += 8
+		case 3:
+			newOffset, ok := skipGroup(data, offset, fieldNum)
+			if !ok {
+				return ""
+			}
+			offset = newOffset
+		case 4:
+			return ""
+		default:
+			newOffset, ok := skipField(data, wireType, offset, fieldNum)
+			if !ok {
+				return ""
+			}
+			offset = newOffset
+		}
+	}
+	return ""
 }
 
 // parseStatusField extracts the status from field 16
@@ -1389,7 +2017,7 @@ func (a *Api) GetMediaList(pageToken string, syncToken string, triggerMode int, 
 	}
 
 	// Parse the response to extract media items
-	result, err := parseMediaListResponse(bodyBytes, limit)
+	result, err := parseMediaListResponse(bodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -1400,6 +2028,59 @@ func (a *Api) GetMediaList(pageToken string, syncToken string, triggerMode int, 
 // buildMediaListRequest creates the protobuf request for fetching media list
 // pageToken comes from the previous response's field 1.1 and goes into request field 1.4
 func buildMediaListRequest(pageToken string, syncToken string, triggerMode int, limit int) []byte {
+	if req, err := buildMediaListRequestFromTemplate(pageToken, syncToken, triggerMode, limit); err == nil && len(req) > 0 {
+		return req
+	}
+	return buildMediaListRequestLegacy(pageToken, syncToken, triggerMode, limit)
+}
+
+func buildMediaListRequestFromTemplate(pageToken string, syncToken string, triggerMode int, limit int) ([]byte, error) {
+	base, err := getMediaListTemplate()
+	if err != nil {
+		return nil, err
+	}
+
+	rootAny := deepCopyJSON(base)
+	root, ok := rootAny.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("template root is not an object")
+	}
+
+	field1Any, ok := root["1"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("template missing field 1 object")
+	}
+
+	// Dynamic: 1.2 = limit (the new template uses field 1.2 as the page size)
+	if limit > 0 {
+		field1Any["2"] = int64(limit)
+	}
+
+	// Dynamic: 1.4 page token (optional)
+	if pageToken != "" {
+		field1Any["4"] = pageToken
+	} else {
+		delete(field1Any, "4")
+	}
+
+	// Dynamic: 1.6 sync token (can be empty)
+	field1Any["6"] = syncToken
+
+	// Dynamic: 1.22.1 trigger mode
+	tMode := int64(2)
+	if triggerMode == 1 {
+		tMode = 1
+	}
+	field22, err := ensureMapPath(field1Any, "22")
+	if err != nil {
+		return nil, err
+	}
+	field22["1"] = tMode
+
+	return buildProtobufFromMap(root)
+}
+
+func buildMediaListRequestLegacy(pageToken string, syncToken string, triggerMode int, limit int) []byte {
 	var buf bytes.Buffer
 
 	// Build field 1 (request data)
@@ -1420,7 +2101,11 @@ func buildMediaListRequestField1(pageToken string, syncToken string, triggerMode
 	// They define which metadata fields to include in the response
 	// field1.1 - media metadata options (file info, timestamps, etc.)
 	mediaMetadataFields := []int{1, 3, 4, 5, 6, 7, 15, 16, 17, 19, 20, 21, 25, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41}
-	field1_1 := buildEmptyNestedMessage(mediaMetadataFields)
+	trashMode := int64(2)
+	if !AppConfig.RequestTrashItems {
+		trashMode = 1
+	}
+	field1_1 := buildMediaListMetadataOptions(mediaMetadataFields, trashMode)
 	writeProtobufField(&buf, 1, field1_1)
 
 	// field1.2 - page size limit (varint)
@@ -1463,6 +2148,34 @@ func buildMediaListRequestField1(pageToken string, syncToken string, triggerMode
 	writeProtobufField(&buf, 22, field22.Bytes())
 
 	return buf.Bytes()
+}
+
+func buildMediaListMetadataOptions(fields []int, trashMode int64) []byte {
+	// Target shape:
+	// 1.1 = { 1: { 1: { <fields> } } }
+	var inner bytes.Buffer
+
+	for _, f := range fields {
+		if f == 21 {
+			continue
+		}
+		writeProtobufString(&inner, f, "")
+	}
+
+	// field 21 - nested message (override)
+	// 21: { 1: <1|2>, 5: { 3: "" } }
+	var field21 bytes.Buffer
+	writeProtobufVarint(&field21, 1, trashMode)
+	var field21_5 bytes.Buffer
+	writeProtobufString(&field21_5, 3, "")
+	writeProtobufField(&field21, 5, field21_5.Bytes())
+	writeProtobufField(&inner, 21, field21.Bytes())
+
+	var level2 bytes.Buffer
+	writeProtobufField(&level2, 1, inner.Bytes())
+	var level1 bytes.Buffer
+	writeProtobufField(&level1, 1, level2.Bytes())
+	return level1.Bytes()
 }
 
 func buildMediaListRequestField2() []byte {
@@ -1520,14 +2233,14 @@ func writeVarint(buf *bytes.Buffer, v uint64) {
 }
 
 // parseMediaListResponse parses the protobuf response and extracts media items
-func parseMediaListResponse(data []byte, limit int) (*MediaListResult, error) {
+func parseMediaListResponse(data []byte) (*MediaListResult, error) {
 	result := &MediaListResult{
 		Items: []MediaItem{},
 	}
 
 	// Parse the response using low-level protobuf parsing
 	// The response has a complex structure, we need to navigate to the media items
-	items, paginationToken, syncToken := extractMediaItemsFromResponse(data, limit)
+	items, paginationToken, syncToken := extractMediaItemsFromResponse(data)
 
 	result.Items = items
 	result.NextPageToken = paginationToken
@@ -1536,71 +2249,16 @@ func parseMediaListResponse(data []byte, limit int) (*MediaListResult, error) {
 	return result, nil
 }
 
-// shouldAddItem checks if we can add more items based on the limit
-func shouldAddItem(currentCount, limit int) bool {
-	return limit <= 0 || currentCount < limit
-}
-
 // extractMediaItemsFromResponse parses the protobuf response bytes and extracts media items
-func extractMediaItemsFromResponse(data []byte, limit int) ([]MediaItem, string, string) {
+func extractMediaItemsFromResponse(data []byte) ([]MediaItem, string, string) {
 	var items []MediaItem
 	var paginationToken string
 	var syncToken string
 
 	// Parse the top-level message
 	offset := 0
-	for offset < len(data) && shouldAddItem(len(items), limit) {
-		fieldNum, wireType, newOffset := readTag(data, offset)
-		if newOffset < 0 {
-			break
-		}
-		offset = newOffset
-
-		switch wireType {
-		case 0: // Varint
-			_, offset = readVarint(data, offset)
-		case 2: // Length-delimited
-			length, newOffset := readVarint(data, offset)
-			if newOffset < 0 || newOffset+int(length) > len(data) {
-				return items, paginationToken, syncToken
-			}
-			fieldData := data[newOffset : newOffset+int(length)]
-			offset = newOffset + int(length)
-
-			// Field 1 contains the main response data
-			if fieldNum == 1 {
-				remainingLimit := 0
-				if limit > 0 {
-					remainingLimit = limit - len(items)
-				}
-				extractedItems, token, sToken := parseResponseField1(fieldData, remainingLimit)
-				items = append(items, extractedItems...)
-				if token != "" {
-					paginationToken = token
-				}
-				if sToken != "" {
-					syncToken = sToken
-				}
-			}
-		case 5: // 32-bit
-			offset += 4
-		case 1: // 64-bit
-			offset += 8
-		default:
-			return items, paginationToken, syncToken
-		}
-	}
-
-	return items, paginationToken, syncToken
-}
-
-// parseResponseField1 parses the field1 of the response which contains media items
-func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
-	var items []MediaItem
-	var paginationToken string
-	var syncToken string
-
-	offset := 0
+	resyncSkips := 0
+	const maxResyncSkips = 256
 	for offset < len(data) {
 		fieldNum, wireType, newOffset := readTag(data, offset)
 		if newOffset < 0 {
@@ -1610,19 +2268,146 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 
 		switch wireType {
 		case 0: // Varint
-			_, offset = readVarint(data, offset)
+			_, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
+			offset = newOffset
 		case 2: // Length-delimited
 			length, newOffset := readVarint(data, offset)
 			if newOffset < 0 || newOffset+int(length) > len(data) {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
 				return items, paginationToken, syncToken
 			}
+			resyncSkips = 0
+			fieldData := data[newOffset : newOffset+int(length)]
+			offset = newOffset + int(length)
+
+				// Field 1 contains the main response data
+				if fieldNum == 1 {
+					extractedItems, token, sToken := parseResponseField1(fieldData)
+					items = append(items, extractedItems...)
+					if token != "" {
+						paginationToken = token
+					}
+					if sToken != "" {
+						syncToken = sToken
+					}
+					// The media list lives under response field 1; avoid scanning other top-level
+					// fields to ensure we only return items from 1.2.
+					return items, paginationToken, syncToken
+				}
+		case 5: // 32-bit
+			if offset+4 > len(data) {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
+			offset += 4
+		case 1: // 64-bit
+			if offset+8 > len(data) {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
+			offset += 8
+		case 3: // Start group
+			newOffset, ok := skipGroup(data, offset, fieldNum)
+			if !ok {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
+			offset = newOffset
+		case 4: // End group (unexpected at top-level)
+			return items, paginationToken, syncToken
+		default:
+			newOffset, ok := skipField(data, wireType, offset, fieldNum)
+			if !ok {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
+			offset = newOffset
+		}
+	}
+
+	return items, paginationToken, syncToken
+}
+
+// parseResponseField1 parses the field1 of the response which contains media items
+func parseResponseField1(data []byte) ([]MediaItem, string, string) {
+	var items []MediaItem
+	var paginationToken string
+	var syncToken string
+
+	offset := 0
+	resyncSkips := 0
+	const maxResyncSkips = 256
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			break
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0: // Varint
+			_, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
+			offset = newOffset
+		case 2: // Length-delimited
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
 
 			// Field 2 contains media items array (repeated field)
 			if fieldNum == 2 {
 				item := tryParseMediaItem(fieldData)
-				if item != nil && item.MediaKey != "" && shouldAddItem(len(items), limit) {
+				if item != nil && item.MediaKey != "" {
 					items = append(items, *item)
 				}
 			}
@@ -1635,11 +2420,53 @@ func parseResponseField1(data []byte, limit int) ([]MediaItem, string, string) {
 				syncToken = string(fieldData)
 			}
 		case 5: // 32-bit
+			if offset+4 > len(data) {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
 			offset += 4
 		case 1: // 64-bit
+			if offset+8 > len(data) {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
 			offset += 8
-		default:
+		case 3: // Start group
+			newOffset, ok := skipGroup(data, offset, fieldNum)
+			if !ok {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
+			offset = newOffset
+		case 4: // End group
 			return items, paginationToken, syncToken
+		default:
+			newOffset, ok := skipField(data, wireType, offset, fieldNum)
+			if !ok {
+				if resyncSkips < maxResyncSkips {
+					resyncSkips++
+					offset++
+					continue
+				}
+				return items, paginationToken, syncToken
+			}
+			resyncSkips = 0
+			offset = newOffset
 		}
 	}
 
@@ -1661,6 +2488,9 @@ func tryParseMediaItem(data []byte) *MediaItem {
 		switch wireType {
 		case 0: // Varint
 			val, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				return item
+			}
 			offset = newOffset
 			// Field 5 might be media type
 			if fieldNum == 5 {
@@ -1678,72 +2508,147 @@ func tryParseMediaItem(data []byte) *MediaItem {
 			fieldData := data[newOffset : newOffset+int(length)]
 			offset = newOffset + int(length)
 
-			// Try to extract media key (field 1) and filename (field 2)
-			// These are typically strings
 			switch fieldNum {
 			case 1:
 				// Could be media key (string) or nested message
 				if isPrintableString(fieldData) && len(fieldData) > minMediaKeyLength {
 					item.MediaKey = string(fieldData)
 				} else {
-					// Try to parse nested message for media info
 					nestedItem := tryParseMediaItem(fieldData)
 					if nestedItem != nil && nestedItem.MediaKey != "" {
 						item.MediaKey = nestedItem.MediaKey
-						if nestedItem.Filename != "" {
+						if nestedItem.Filename != "" && item.Filename == "" {
 							item.Filename = nestedItem.Filename
 						}
-						if nestedItem.MediaType != "" {
+						if nestedItem.MediaType != "" && item.MediaType == "" {
 							item.MediaType = nestedItem.MediaType
+						}
+						if nestedItem.DedupKey != "" && item.DedupKey == "" {
+							item.DedupKey = nestedItem.DedupKey
 						}
 					}
 				}
 			case 2:
 				// Field 2 is a nested message containing metadata including filename at sub-field 4
-				// Try to extract filename, quota usage markers, and status from nested structure first
 				filename, countsTowardsQuota, status, isTrash := extractField2Metadata(fieldData)
 				if filename != "" {
 					item.Filename = filename
 				} else if isPrintableString(fieldData) {
 					// Fallback: Could be filename or dedup key directly
-					if item.Filename == "" && strings.Contains(string(fieldData), ".") {
-						item.Filename = string(fieldData)
+					str := string(fieldData)
+					if item.Filename == "" && strings.Contains(str, ".") {
+						item.Filename = str
 					} else if item.DedupKey == "" {
-						item.DedupKey = string(fieldData)
+						item.DedupKey = str
 					}
 				}
 
-				item.CountsTowardsQuota = countsTowardsQuota
+				item.CountsTowardsQuota = item.CountsTowardsQuota || countsTowardsQuota
 				if status > 0 {
 					item.Status = status
 				}
 				if isTrash {
 					item.IsTrash = true
 				}
-			case 3:
-				// SHA1 hash - skip for now
+				if item.DedupKey == "" {
+					item.DedupKey = extractDedupKeyFromField2(fieldData)
+				}
 			case 4:
 				// Timestamp nested message
 				ts := tryParseTimestamp(fieldData)
 				if ts > 0 {
 					item.Timestamp = ts
 				}
+			case 6:
+				// Field 6 is often a nested message that also contains the media key at sub-field 1
+				if item.MediaKey == "" {
+					nestedItem := tryParseMediaItem(fieldData)
+					if nestedItem != nil && nestedItem.MediaKey != "" {
+						item.MediaKey = nestedItem.MediaKey
+					}
+				}
+			case 22:
+				if parseQuotaInfo(fieldData) {
+					item.CountsTowardsQuota = true
+				}
+			}
+		case 5: // 32-bit
+			if offset+4 > len(data) {
+				return item
+			}
+			offset += 4
+		case 1: // 64-bit
+			if offset+8 > len(data) {
+				return item
+			}
+			offset += 8
+		case 3: // Start group
+			newOffset, ok := skipGroup(data, offset, fieldNum)
+			if !ok {
+				return item
+			}
+			offset = newOffset
+		case 4: // End group
+			return item
+		default:
+			newOffset, ok := skipField(data, wireType, offset, fieldNum)
+			if !ok {
+				return item
+			}
+			offset = newOffset
+		}
+	}
+
+	return item
+}
+
+// parseQuotaInfo checks if field 22 indicates quota consumption
+func parseQuotaInfo(data []byte) bool {
+	offset := 0
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			break
+		}
+		offset = newOffset
+
+		switch wireType {
+		case 0: // Varint
+			val, newOffset := readVarint(data, offset)
+			if newOffset < 0 {
+				return false
+			}
+			offset = newOffset
+			// Field 1: 0 means no quota
+			if fieldNum == 1 {
+				if val == 0 {
+					return false
+				}
+			}
+		case 2: // Length-delimited
+			length, newOffset := readVarint(data, offset)
+			if newOffset < 0 || newOffset+int(length) > len(data) {
+				return false
+			}
+			offset = newOffset + int(length)
+
+			// Field 1: Message means quota consumed
+			if fieldNum == 1 {
+				return true
 			}
 		case 5: // 32-bit
 			offset += 4
 		case 1: // 64-bit
 			offset += 8
 		default:
-			return item
-		}
-
-		// Field 22 indicates quota usage (at item level)
-		if fieldNum == 22 {
-			item.CountsTowardsQuota = true
+			newOffset, ok := skipField(data, wireType, offset, fieldNum)
+			if !ok {
+				return false
+			}
+			offset = newOffset
 		}
 	}
-
-	return item
+	return false
 }
 
 // tryParseTimestamp attempts to parse a timestamp from a nested protobuf message
@@ -1811,6 +2716,66 @@ func readVarint(data []byte, offset int) (uint64, int) {
 		}
 	}
 	return 0, -1
+}
+
+// skipField skips over an unknown protobuf field's value starting at offset (immediately after the tag).
+// It returns the updated offset and whether skipping was successful.
+func skipField(data []byte, wireType int, offset int, fieldNum int) (int, bool) {
+	switch wireType {
+	case 0: // Varint
+		_, newOffset := readVarint(data, offset)
+		if newOffset < 0 {
+			return offset, false
+		}
+		return newOffset, true
+	case 1: // 64-bit
+		if offset+8 > len(data) {
+			return offset, false
+		}
+		return offset + 8, true
+	case 2: // Length-delimited
+		length, newOffset := readVarint(data, offset)
+		if newOffset < 0 || newOffset+int(length) > len(data) {
+			return offset, false
+		}
+		return newOffset + int(length), true
+	case 3: // Start group (deprecated but still possible)
+		return skipGroup(data, offset, fieldNum)
+	case 4: // End group
+		// Caller should handle end-group; don't advance here.
+		return offset, true
+	case 5: // 32-bit
+		if offset+4 > len(data) {
+			return offset, false
+		}
+		return offset + 4, true
+	default:
+		return offset, false
+	}
+}
+
+// skipGroup skips a protobuf group starting at offset (immediately after the start-group tag).
+// It returns the offset after the matching end-group tag.
+func skipGroup(data []byte, offset int, groupFieldNum int) (int, bool) {
+	for offset < len(data) {
+		fieldNum, wireType, newOffset := readTag(data, offset)
+		if newOffset < 0 {
+			return offset, false
+		}
+		offset = newOffset
+
+		// End-group tag matching our group's field number.
+		if wireType == 4 && fieldNum == groupFieldNum {
+			return offset, true
+		}
+
+		var ok bool
+		offset, ok = skipField(data, wireType, offset, fieldNum)
+		if !ok {
+			return offset, false
+		}
+	}
+	return offset, false
 }
 
 // isPrintableString checks if the byte slice contains valid printable characters

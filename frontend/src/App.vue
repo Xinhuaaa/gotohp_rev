@@ -121,7 +121,7 @@ const handleCopyClick = () => {
 </script>
 
 <template>
-  <main class="w-screen h-screen flex flex-col items-center" style="--wails-draggable: drag">
+  <main class="w-screen h-screen flex flex-col items-center" style="--wails-draggable: none">
     <div v-if="!uploadState.isUploading" class="w-full h-full flex flex-col">
       <template v-if="options.length === 0">
         <div class="w-full h-full flex flex-col items-center gap-4 max-w-md pt-30">
@@ -133,8 +133,9 @@ const handleCopyClick = () => {
 
       <template v-else>
         <!-- Navigation header -->
-        <div class="flex items-center justify-between p-4 border-b">
-          <div class="flex gap-2">
+        <div class="relative flex items-center justify-between p-4 border-b">
+          <div class="absolute inset-0" style="--wails-draggable: drag"></div>
+          <div class="relative flex gap-2" style="--wails-draggable: none">
             <Button 
               :variant="activeView === 'upload' ? 'default' : 'outline'" 
               @click="activeView = 'upload'"
@@ -151,7 +152,7 @@ const handleCopyClick = () => {
             </Button>
           </div>
 
-          <div class="flex items-center gap-2">
+          <div class="relative flex items-center gap-2" style="--wails-draggable: none">
             <EditableSelect v-model="selectedOption" :options="options"
               @update:options="(newOptions) => options = newOptions" @item-added="addCredentials"
               @item-removed="removeCredentials" />

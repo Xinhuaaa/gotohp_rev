@@ -24,6 +24,7 @@ Unofficial Google Photos Desktop GUI Client
 - Adjustable thumbnail sizes (small, medium, large)
 - One-click photo download
 - Pagination support
+- Optional periodic update checks (incremental sync) with quota-item “wash” (download + re-upload)
 
 ### General Features
 - Credential management for multiple accounts
@@ -67,7 +68,6 @@ gotohp-cli.exe version
   - `--png` - Get PNG format instead of JPEG
   - `-c, --config <path>` - Path to config file
 - `list` (alias: `ls`) - List media items in Google Photos
-  - `-n, --limit <n>` - Maximum number of items per page
   - `--pages <n>` - Number of pages to fetch (default: 1)
   - `-p, --page-token <t>` - Page token for pagination
   - `-j, --json` - Output in JSON format

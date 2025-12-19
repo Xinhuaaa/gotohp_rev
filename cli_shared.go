@@ -5,8 +5,10 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 //go:embed build/windows/info.json
@@ -24,6 +26,7 @@ func isCLICommand(arg string) bool {
 		"thumbnail", "thumb", // Get thumbnail at various sizes
 		"list", "ls", // List media items
 		"albums", // List albums
+		"autowash", // Start auto-wash service
 		"credentials", "creds", // Support both full and short form
 		"help", "--help", "-h",
 		"version", "--version", "-v",
@@ -238,41 +241,31 @@ func runCLI() {
 			os.Exit(1)
 		}
 
-	case "list", "ls":
+		case "list", "ls":
 		// Check for help flag first
 		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
 			printListHelp()
 			return
 		}
 
-		// Parse flags
-		configPath := ""
-		limit := 0          // 0 means no limit
-		pages := 1          // Default to 1 page
-		maxEmptyPages := 10 // Default max empty page retries
-		pageToken := ""
-		jsonOutput := false
+			// Parse flags
+			configPath := ""
+			pages := 1          // Default to 1 page
+			maxEmptyPages := 10 // Default max empty page retries
+			pageToken := ""
+			jsonOutput := false
 
 		for i := 2; i < len(os.Args); i++ {
 			switch os.Args[i] {
-			case "--config", "-c":
-				if i+1 < len(os.Args) {
-					configPath = os.Args[i+1]
-					i++
-				}
-			case "--limit", "-n":
-				if i+1 < len(os.Args) {
-					_, err := fmt.Sscanf(os.Args[i+1], "%d", &limit)
-					if err != nil || limit < 0 {
-						fmt.Fprintf(os.Stderr, "Warning: invalid limit value '%s', using no limit\n", os.Args[i+1])
-						limit = 0
+				case "--config", "-c":
+					if i+1 < len(os.Args) {
+						configPath = os.Args[i+1]
+						i++
 					}
-					i++
-				}
-			case "--pages":
-				if i+1 < len(os.Args) {
-					_, err := fmt.Sscanf(os.Args[i+1], "%d", &pages)
-					if err != nil || pages < 1 {
+				case "--pages":
+					if i+1 < len(os.Args) {
+						_, err := fmt.Sscanf(os.Args[i+1], "%d", &pages)
+						if err != nil || pages < 1 {
 						fmt.Fprintf(os.Stderr, "Warning: invalid pages value '%s', using 1\n", os.Args[i+1])
 						pages = 1
 					}
@@ -300,14 +293,14 @@ func runCLI() {
 		// Set custom config path if provided
 		if configPath != "" {
 			backend.ConfigPath = configPath
-		}
+			}
 
-		// Run list
-		err := runCLIList(pageToken, limit, pages, maxEmptyPages, jsonOutput)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "List failed: %v\n", err)
-			os.Exit(1)
-		}
+			// Run list
+			err := runCLIList(pageToken, pages, maxEmptyPages, jsonOutput)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "List failed: %v\n", err)
+				os.Exit(1)
+			}
 
 	case "albums":
 		// Check for help flag first
@@ -400,6 +393,84 @@ func runCLI() {
 			}
 
 			currentPageToken = result.NextPageToken
+		}
+
+	case "autowash":
+		// Check for help
+		if len(os.Args) > 2 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
+			fmt.Println("Usage: gotohp autowash [flags]")
+			fmt.Println("\nFlags:")
+			fmt.Println("  -i, --interval <duration>    Check interval (default: 1h, e.g. 30m, 2h)")
+			fmt.Println("  --db <path>                  Database file path (default: media_db.json)")
+			fmt.Println("  --backup-dir <path>          Directory for temporary downloads (default: Downloads/gotohp_backup)")
+			fmt.Println("  -r, --retention <days>       Days to keep downloaded files (default: 7)")
+			fmt.Println("  -c, --config <path>          Path to config file")
+			return
+		}
+
+		// Defaults
+		config := backend.AutoWashConfig{
+			Interval:      1 * time.Hour,
+			DbPath:        "media_db.json",
+			BackupDir:     "Downloads/gotohp_backup",
+			RetentionDays: 7,
+		}
+		
+		if home, err := os.UserHomeDir(); err == nil {
+			config.BackupDir = filepath.Join(home, "Downloads", "gotohp_backup")
+		}
+
+		configPath := ""
+
+		// Parse flags
+		for i := 2; i < len(os.Args); i++ {
+			switch os.Args[i] {
+			case "--interval", "-i":
+				if i+1 < len(os.Args) {
+					d, err := time.ParseDuration(os.Args[i+1])
+					if err == nil {
+						config.Interval = d
+					} else {
+						fmt.Fprintf(os.Stderr, "Invalid interval '%s', using default 1h\n", os.Args[i+1])
+					}
+					i++
+				}
+			case "--db":
+				if i+1 < len(os.Args) {
+					config.DbPath = os.Args[i+1]
+					i++
+				}
+			case "--backup-dir":
+				if i+1 < len(os.Args) {
+					config.BackupDir = os.Args[i+1]
+					i++
+				}
+			case "--retention", "-r":
+				if i+1 < len(os.Args) {
+					fmt.Sscanf(os.Args[i+1], "%d", &config.RetentionDays)
+					i++
+				}
+			case "--config", "-c":
+				if i+1 < len(os.Args) {
+					configPath = os.Args[i+1]
+					i++
+				}
+			}
+		}
+
+		if configPath != "" {
+			backend.ConfigPath = configPath
+		}
+		
+		// Load config (credentials needed)
+		if err := backend.LoadConfig(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := backend.RunAutoWash(config); err != nil {
+			fmt.Fprintf(os.Stderr, "Auto-wash service error: %v\n", err)
+			os.Exit(1)
 		}
 
 	case "credentials", "creds":
@@ -506,7 +577,6 @@ func printListHelp() {
 	fmt.Println("List media items in your Google Photos library.")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -n, --limit <n>          Maximum number of items to return per page")
 	fmt.Println("  --pages <n>              Number of pages to fetch (default: 1)")
 	fmt.Println("  --max-empty-pages <n>    Maximum consecutive empty pages to skip (default: 10)")
 	fmt.Println("  -p, --page-token <t>     Page token for pagination")

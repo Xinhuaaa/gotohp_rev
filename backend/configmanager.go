@@ -25,6 +25,9 @@ type Config struct {
 	DeleteFromHost                bool     `json:"deleteFromHost" koanf:"delete_from_host"`
 	DisableUnsupportedFilesFilter bool     `json:"disableUnsupportedFilesFilter" koanf:"disable_unsupported_files_filter"`
 	ThumbnailSize                 string   `json:"thumbnailSize" koanf:"thumbnail_size"`
+	UpdateCheckIntervalSeconds    int      `json:"updateCheckIntervalSeconds" koanf:"update_check_interval_seconds"`
+	AutoWashQuotaItems            bool     `json:"autoWashQuotaItems" koanf:"auto_wash_quota_items"`
+	RequestTrashItems             bool     `json:"requestTrashItems" koanf:"request_trash_items"`
 }
 
 type ConfigManager struct{}
@@ -35,6 +38,10 @@ var ConfigPath string
 var DefaultConfig = Config{
 	UploadThreads: 3,
 	ThumbnailSize: "medium",
+	// Disabled by default; user can enable in Settings.
+	UpdateCheckIntervalSeconds: 0,
+	AutoWashQuotaItems:         false,
+	RequestTrashItems:          true,
 }
 
 // ParseAuthString parses an auth string and returns url.Values (exported for CLI use)
@@ -105,6 +112,24 @@ func (g *ConfigManager) SetThumbnailSize(thumbnailSize string) {
 		return
 	}
 	AppConfig.ThumbnailSize = thumbnailSize
+	saveAppConfig()
+}
+
+func (g *ConfigManager) SetUpdateCheckIntervalSeconds(seconds int) {
+	if seconds < 0 {
+		return
+	}
+	AppConfig.UpdateCheckIntervalSeconds = seconds
+	saveAppConfig()
+}
+
+func (g *ConfigManager) SetAutoWashQuotaItems(enabled bool) {
+	AppConfig.AutoWashQuotaItems = enabled
+	saveAppConfig()
+}
+
+func (g *ConfigManager) SetRequestTrashItems(enabled bool) {
+	AppConfig.RequestTrashItems = enabled
 	saveAppConfig()
 }
 
@@ -289,6 +314,12 @@ func loadAppConfig() Config {
 
 	if c.UploadThreads < 1 {
 		c.UploadThreads = DefaultConfig.UploadThreads
+	}
+	if c.ThumbnailSize == "" {
+		c.ThumbnailSize = DefaultConfig.ThumbnailSize
+	}
+	if c.UpdateCheckIntervalSeconds < 0 {
+		c.UpdateCheckIntervalSeconds = DefaultConfig.UpdateCheckIntervalSeconds
 	}
 
 	return c

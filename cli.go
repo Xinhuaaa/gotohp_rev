@@ -429,7 +429,7 @@ func runCLIThumbnail(mediaKey, outputPath string, width, height int, size string
 }
 
 // CLI list implementation
-func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonOutput bool) error {
+func runCLIList(pageToken string, pages int, maxEmptyPages int, jsonOutput bool) error {
 	// Load backend config
 	err := backend.LoadConfig()
 	if err != nil {
@@ -459,8 +459,9 @@ func runCLIList(pageToken string, limit int, pages int, maxEmptyPages int, jsonO
 			}
 		}
 
-		// For CLI list, we use passive mode (2) and empty sync token
-		result, err := api.GetMediaList(currentPageToken, "", 2, limit)
+		// For CLI list, we use passive mode (2) and empty sync token.
+		// Note: the server-side page size is not reliably controlled by a limit parameter.
+		result, err := api.GetMediaList(currentPageToken, "", 2, 0)
 		if err != nil {
 			return fmt.Errorf("failed to get media list: %w", err)
 		}

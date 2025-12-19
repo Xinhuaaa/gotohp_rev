@@ -35,6 +35,13 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
-echo Build SUCCESS! Output: gotohp.exe
+echo Building CLI version...
+go build -tags cli -o gotohp-cli.exe
+if %errorlevel% neq 0 (
+    echo CLI build failed!
+    exit /b %errorlevel%
+)
+
+echo Build SUCCESS! Output: gotohp.exe, gotohp-cli.exe
 endlocal
 pause

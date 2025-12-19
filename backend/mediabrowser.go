@@ -2,7 +2,10 @@ package backend
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -100,6 +103,59 @@ func (m *MediaBrowser) GetThumbnail(mediaKey string, size string) (string, error
 	return base64Data, nil
 }
 
+func validateDebugURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "https" {
+		return nil, errors.New("only https URLs are allowed")
+	}
+	// Avoid leaking the bearer token by accidentally sending it to a non-Google endpoint.
+	if u.Host != "photosdata-pa.googleapis.com" {
+		return nil, fmt.Errorf("unsupported host %q (only photosdata-pa.googleapis.com allowed)", u.Host)
+	}
+	return u, nil
+}
+
+// DebugProtobufRequest sends an authenticated protobuf POST request built from a numeric-key JSON structure
+// and returns a best-effort JSON dump of the protobuf response for inspection.
+func (m *MediaBrowser) DebugProtobufRequest(endpoint string, requestJSON string) (string, error) {
+	u, err := validateDebugURL(endpoint)
+	if err != nil {
+		return "", err
+	}
+
+	api, err := m.getAPI()
+	if err != nil {
+		return "", fmt.Errorf("failed to create API client: %w", err)
+	}
+
+	requestData, err := buildProtobufFromJSONText(requestJSON)
+	if err != nil {
+		return "", err
+	}
+
+	respBytes, err := api.doProtobufPOST(u.String(), requestData)
+	if err != nil {
+		return "", err
+	}
+
+	decoded, ok := decodeProtobufMessage(respBytes, 0)
+	if !ok {
+		// Fallback to raw bytes info if we cannot decode.
+		decoded = map[string]any{
+			"raw": bufferObject(respBytes),
+		}
+	}
+
+	out, err := json.MarshalIndent(decoded, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+	return string(out), nil
+}
+
 // DownloadMedia downloads a media item to the user's Downloads folder
 func (m *MediaBrowser) DownloadMedia(mediaKey string) (string, error) {
 	api, err := m.getAPI()
@@ -170,4 +226,40 @@ func (m *MediaBrowser) DownloadMedia(mediaKey string) (string, error) {
 	}
 
 	return outputPath, nil
+}
+
+// DeleteMedia moves a media item to trash (soft delete).
+func (m *MediaBrowser) DeleteMedia(mediaKey string) error {
+	if len(mediaKey) < minMediaKeyLength {
+		return fmt.Errorf("invalid media key")
+	}
+
+	api, err := m.getAPI()
+	if err != nil {
+		return fmt.Errorf("failed to create API client: %w", err)
+	}
+
+	if err := api.MoveToTrash([]string{mediaKey}); err != nil {
+		return fmt.Errorf("failed to move to trash: %w", err)
+	}
+
+	return nil
+}
+
+// PermanentlyDeleteMedia permanently deletes a media item by its dedup key.
+func (m *MediaBrowser) PermanentlyDeleteMedia(dedupKey string) error {
+	if dedupKey == "" {
+		return fmt.Errorf("invalid dedup key")
+	}
+
+	api, err := m.getAPI()
+	if err != nil {
+		return fmt.Errorf("failed to create API client: %w", err)
+	}
+
+	if err := api.PermanentlyDelete([]string{dedupKey}); err != nil {
+		return fmt.Errorf("failed to permanently delete: %w", err)
+	}
+
+	return nil
 }

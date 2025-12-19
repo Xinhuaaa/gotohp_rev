@@ -39,3 +39,18 @@ app.exe
 gotohp.exe
 reference/incremental_update_summary.md
 reference/protobuf_definitions.md
+
+# Local DB and Config
+media_db.json
+
+# Build Artifacts
+gotohp-cli.exe
+gotohp-cli-linux
+
+# System Files
+.gemini/
+*.log
+.DS_Store
+Thumbs.db
+
+reference/gfqq2
