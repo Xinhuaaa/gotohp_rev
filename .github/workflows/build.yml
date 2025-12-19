@@ -288,9 +288,6 @@ jobs:
         run: |
           go install github.com/go-task/task/v3/cmd/task@latest
 
-      - name: Install Wails3
-        run: go install -v github.com/wailsapp/wails/v3/cmd/wails3@latest
-
       - name: Build Linux App (Production)
         run: |
           mkdir -p release
